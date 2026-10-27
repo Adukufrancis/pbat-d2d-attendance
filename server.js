@@ -658,7 +658,7 @@ app.post('/api/checkin', h(async (req, res) => {
     if (person && (await db.one('deviceCount', [person.id])).n > 0) {
       // One phone per person: nobody can register someone else's number on their own phone.
       return res.status(409).json({ reason: 'taken', venue: venue.name,
-        error: 'This PBAT-D2D number is already linked to another phone. If you changed phones, ask the office admin to reset it.' });
+        error: 'This PBAT-D2D number is already registered, on this phone in another app or on another phone.' });
     }
     if (!person) {
       const { id } = await db.one('addPerson', [name, number, Date.now()]);

@@ -81,6 +81,10 @@ async function run(extra = {}, form = null) {
       <li>Come back here and tap <b>Try again</b>.</li></ol>${retry}`);
   } else if (data.reason === 'expired') {
     state('expired', 'Old QR code', esc(data.error));
+  } else if (data.reason === 'taken') {
+    state('error', 'Already registered', esc(data.error), `<ol class="steps small">
+      <li><b>Is it your phone?</b> Close this page and scan the QR code with your <b>Camera app</b>. Don't open the link from WhatsApp or another app.</li>
+      <li><b>New or different phone?</b> Ask the office admin to <b>reset your phone</b>, then scan again.</li></ol>`);
   } else if (data.reason === 'offline') {
     state('network', 'No connection', esc(data.error), retry);
   } else {
