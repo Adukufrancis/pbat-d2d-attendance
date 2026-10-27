@@ -1,4 +1,4 @@
-import { $, $$, api, esc, toast, EYE } from '/common.js';
+import { $, $$, api, esc, toast, EYE, fancySelect } from '/common.js';
 
 let S = null;                       // dashboard state from the server
 const fmtDay = (d, opts = { weekday: 'long', day: 'numeric', month: 'long' }) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, opts);
@@ -41,6 +41,7 @@ async function loadState() {
   const sel = $('#venue-filter'), cur = sel.value;
   sel.innerHTML = '<option value="0">All offices</option>' + S.venues.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
   sel.value = cur || '0';
+  fancySelect(sel).render();
 }
 
 function renderVenues() {
@@ -192,6 +193,7 @@ $('#people').addEventListener('click', async (e) => {
       form.innerHTML = `<h3>Sign ${out ? 'out' : 'in'} ${esc(p.name)}</h3><p class="muted">Recorded as now, marked "by admin".</p>
         <label class="field"><span>Office</span><select id="sign-venue">${venues.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></label>
         <div class="dlg-actions"><button class="btn" value="ok">Sign ${out ? 'out' : 'in'}</button><button class="btn ghost" value="cancel" formnovalidate>Cancel</button></div>`;
+      fancySelect($('#sign-venue'));
       const choice = await new Promise((resolve) => { dlg.onclose = () => resolve(dlg.returnValue === 'ok' ? $('#sign-venue').value : null); dlg.showModal(); });
       if (!choice) return;
       venue = Number(choice);

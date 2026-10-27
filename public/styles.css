@@ -255,3 +255,33 @@ label.btn { cursor: pointer; }
 .dropdown .menu a:hover { background: var(--mint-soft); }
 .dropdown .menu a b { font-size: 14px; }
 .dropdown .menu a span { font-size: 12px; color: var(--muted); }
+
+/* Styled dropdown (replaces the browser's plain one) */
+.fsel-native { position: absolute !important; opacity: 0; pointer-events: none; width: 1px !important; height: 1px; }
+.fsel { position: relative; min-width: 220px; }
+.fsel-btn { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1.5px solid var(--line); border-radius: 12px; background: #fff;
+  font: 600 14px Inter, sans-serif; color: var(--ink); cursor: pointer; text-align: left; transition: border-color .15s, box-shadow .15s; }
+.fsel-btn:hover { border-color: var(--green); }
+.fsel.open .fsel-btn, .fsel-btn:focus-visible { border-color: var(--green); box-shadow: 0 0 0 4px rgba(10,107,61,.15); outline: none; }
+.fsel-ico { width: 26px; height: 26px; border-radius: 8px; background: var(--mint-soft); display: grid; place-items: center; flex: none; }
+.fsel-ico svg { width: 15px; height: 15px; fill: none; stroke: var(--green); stroke-width: 2; }
+.fsel-val { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fsel-btn > svg { width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s; flex: none; }
+.fsel.open .fsel-btn > svg { transform: rotate(180deg); }
+.fsel-list { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 30; background: #fff; border-radius: 14px; padding: 6px; max-height: 280px; overflow: auto;
+  box-shadow: 0 18px 40px -12px rgba(6,40,22,.35), 0 0 0 1px var(--line); animation: rise .15s ease-out; }
+.fsel-list button { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border: 0; background: none; border-radius: 10px;
+  font: 500 14px Inter, sans-serif; color: var(--ink); cursor: pointer; text-align: left; }
+.fsel-list button:hover, .fsel-list button:focus { background: var(--mint-soft); outline: none; }
+.fsel-list button.on { color: var(--green-deep); font-weight: 700; }
+.fsel-list button svg { width: 16px; height: 16px; fill: none; stroke: var(--green); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+dialog .fsel { min-width: 0; }
+dialog .fsel-btn { padding: 11px 12px; font-size: 15px; }
+
+/* Filter bar as one tidy card */
+.filters { background: var(--card); border-radius: 16px; padding: 14px 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); gap: 14px; }
+.filters .field.small input[type=date] { padding: 9px 11px; border-radius: 12px; font-weight: 600; font-size: 14px; color: var(--ink); }
+.quick .chip { transition: background .15s, border-color .15s; }
+.quick .chip:hover { background: var(--mint-soft); border-color: var(--green); }
+
+dialog { overflow: visible; }
