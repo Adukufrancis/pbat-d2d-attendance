@@ -69,6 +69,16 @@ function passwordOk(pw) {
 }
 const pwVersion = () => (adminPw ? adminPw.hash.slice(0, 12) : 'env');   // changing the password logs other devices out
 
+// ---- Other admins -----------------------------------------------------------------
+// The main admin (username "admin", password above) can add other admins, each with their own
+// username and password. Kept in memory too, so checking a login cookie needs no database call.
+let admins = [];
+const loadAdmins = async () => { admins = await db.q('admins'); };
+await loadAdmins();
+const MAIN = { id: 0, name: 'Main admin', username: 'admin', main: true };
+const adminVer = (id) => (id === 0 ? pwVersion() : (admins.find((a) => a.id === id)?.hash || '').slice(0, 12));
+const normUser = (u) => String(u || '').trim().toLowerCase();
+
 // ---- Check-out -------------------------------------------------------------------
 // From CHECKOUT_TIME (24-hour, default 17:00) a second scan checks the person out.
 const [OUT_H, OUT_M] = (/^(\d{1,2}):(\d{2})$/.exec(process.env.CHECKOUT_TIME || '17:00') || [0, 17, 0]).slice(1).map(Number);
@@ -182,31 +192,84 @@ app.use('/api', (req, res, next) => {
 // ---- Admin login ----------------------------------------------------------------
 const ADMIN_COOKIE = 'adm';
 const ADMIN_DAYS = 30;
-const adminToken = () => { const exp = Date.now() + ADMIN_DAYS * 864e5; return `${exp}.${hmac(`admin:${exp}:${pwVersion()}`)}`; };
-const isAdmin = (req) => {
-  const [exp, sig] = String(req.cookies[ADMIN_COOKIE] || '').split('.');
-  return Number(exp) > Date.now() && safeEqual(sig, hmac(`admin:${exp}:${pwVersion()}`));
-};
-const setAdminCookie = (res) => res.cookie(ADMIN_COOKIE, adminToken(), { httpOnly: true, secure: IS_PROD, sameSite: 'strict', maxAge: ADMIN_DAYS * 864e5, path: '/' });
-const needAdmin = (req, res, next) => (isAdmin(req) ? next() : res.status(401).json({ error: 'Please log in.' }));
+// Cookie: <expiry>.<admin id>.<signature>. The signature includes the admin's password version, so
+// changing a password (or removing an admin) logs that admin out everywhere.
+const adminToken = (id) => { const exp = Date.now() + ADMIN_DAYS * 864e5; return `${exp}.${id}.${hmac(`admin:${exp}:${id}:${adminVer(id)}`)}`; };
+function getAdmin(req) {
+  const [exp, rawId, sig] = String(req.cookies[ADMIN_COOKIE] || '').split('.');
+  const id = Number(rawId);
+  if (!(Number(exp) > Date.now()) || !Number.isInteger(id)) return null;
+  const who = id === 0 ? MAIN : admins.find((a) => a.id === id);
+  if (!who || !safeEqual(sig, hmac(`admin:${exp}:${id}:${adminVer(id)}`))) return null;
+  return { id, name: who.name, username: who.username, main: id === 0 };
+}
+const isAdmin = (req) => Boolean(getAdmin(req));
+const setAdminCookie = (res, id) => res.cookie(ADMIN_COOKIE, adminToken(id), { httpOnly: true, secure: IS_PROD, sameSite: 'strict', maxAge: ADMIN_DAYS * 864e5, path: '/' });
+const needAdmin = (req, res, next) => { req.admin = getAdmin(req); return req.admin ? next() : res.status(401).json({ error: 'Please log in.' }); };
+const needMain = (req, res, next) => { req.admin = getAdmin(req); return req.admin?.main ? next() : res.status(403).json({ error: 'Only the main admin can do this.' }); };
 
 const loginTries = new Map();
 app.post('/api/admin/login', (req, res) => {
   const now = Date.now();
   const tries = (loginTries.get(clientIp(req)) || []).filter((t) => now - t < 15 * 60e3);
   if (tries.length >= 10) return res.status(429).json({ error: 'Too many attempts. Wait 15 minutes and try again.' });
-  if (!passwordOk(req.body.password)) {
+  const user = normUser(req.body.username) || 'admin';
+  const other = user === 'admin' ? null : admins.find((a) => a.username === user);
+  const ok = user === 'admin' ? passwordOk(req.body.password)
+    : Boolean(other) && safeEqual(scrypt(String(req.body.password || ''), other.salt), other.hash);
+  if (!ok) {
     tries.push(now); loginTries.set(clientIp(req), tries);
-    return res.status(401).json({ error: 'Wrong password.' });
+    return res.status(401).json({ error: 'Wrong username or password.' });
   }
   loginTries.delete(clientIp(req));
-  setAdminCookie(res);
+  setAdminCookie(res, other ? other.id : 0);
   res.json({ ok: true });
 });
 
+app.get('/api/admin/me', needAdmin, (req, res) => res.json(req.admin));
+
+// Main admin: manage the other admins.
+app.get('/api/admin/admins', needMain, (req, res) => res.json({
+  admins: admins.map(({ id, name, username, created_at }) => ({ id, name, username, created_at })),
+}));
+app.post('/api/admin/admins', needMain, h(async (req, res) => {
+  const name = String(req.body.name || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+  const username = normUser(req.body.username);
+  const password = String(req.body.password || '');
+  const fields = {};
+  if (name.length < 2) fields.name = 'Enter their name.';
+  if (!/^[a-z0-9._-]{3,30}$/.test(username)) fields.username = '3 to 30 letters or numbers (no spaces).';
+  else if (username === 'admin' || admins.some((a) => a.username === username)) fields.username = 'That username is taken.';
+  if (password.length < 8) fields.password = 'Use at least 8 characters.';
+  if (Object.keys(fields).length) return res.status(400).json({ fields, error: 'Please fix the highlighted fields.' });
+  const salt = crypto.randomBytes(16).toString('hex');
+  await db.q('addAdmin', [name, username, salt, scrypt(password, salt), Date.now()]);
+  await loadAdmins();
+  res.json({ ok: true });
+}));
+app.post('/api/admin/admins/:id/delete', needMain, h(async (req, res) => {
+  await db.q('deleteAdmin', [Number(req.params.id)]); await loadAdmins(); res.json({ ok: true });
+}));
+app.post('/api/admin/admins/:id/password', needMain, h(async (req, res) => {
+  const password = String(req.body.password || '');
+  if (password.length < 8) return res.status(400).json({ error: 'Use at least 8 characters.' });
+  const salt = crypto.randomBytes(16).toString('hex');
+  await db.q('setAdminPw', [Number(req.params.id), salt, scrypt(password, salt)]); await loadAdmins();
+  res.json({ ok: true });
+}));
+
 // Change the admin password from the dashboard (needs the current one).
-app.post('/api/admin/password', (req, res, next) => (isAdmin(req) ? next() : res.status(401).json({ error: 'Please log in.' })), h(async (req, res) => {
+app.post('/api/admin/password', needAdmin, h(async (req, res) => {
   const { current, next: fresh } = req.body;
+  if (!req.admin.main) {                                  // another admin changing their own password
+    const me = admins.find((a) => a.id === req.admin.id);
+    if (!safeEqual(scrypt(String(current || ''), me.salt), me.hash)) return res.status(400).json({ field: 'current', error: 'Your current password is wrong.' });
+    if (String(fresh || '').length < 8) return res.status(400).json({ field: 'next', error: 'Use at least 8 characters.' });
+    const salt = crypto.randomBytes(16).toString('hex');
+    await db.q('setAdminPw', [me.id, salt, scrypt(fresh, salt)]); await loadAdmins();
+    setAdminCookie(res, me.id);
+    return res.json({ ok: true });
+  }
   if (!passwordOk(current)) return res.status(400).json({ field: 'current', error: 'Your current password is wrong.' });
   if (String(fresh || '').length < 8) return res.status(400).json({ field: 'next', error: 'Use at least 8 characters.' });
   if (passwordOk(fresh)) return res.status(400).json({ field: 'next', error: "That's the same as your current password." });
@@ -214,7 +277,7 @@ app.post('/api/admin/password', (req, res, next) => (isAdmin(req) ? next() : res
   const saved = { salt, hash: scrypt(fresh, salt), env: ENV_MARK };
   await db.q('setSetting', ['admin_pw', JSON.stringify(saved)]);
   adminPw = saved; tempPassword = null;
-  setAdminCookie(res);                                    // stay logged in here; other devices are logged out
+  setAdminCookie(res, 0);                                    // stay logged in here; other devices are logged out
   res.json({ ok: true });
 }));
 app.post('/api/admin/logout', (req, res) => { res.clearCookie(ADMIN_COOKIE, { path: '/' }); res.json({ ok: true }); });
@@ -228,7 +291,12 @@ app.get('/api/admin/state', needAdmin, h(async (req, res) => {
     const c = await db.one('countToday', [v.id, today]);
     v.today = c.n; v.out = c.out;
   }
-  res.json({ appName: APP_NAME, here, today, timezone: TZ, checkoutTime: CHECKOUT_LABEL, venues });
+  const t = await db.one('todayTotals', [today]);
+  const listed = (await db.one('listedCount')).n;
+  const absent = listed ? await db.q('absentToday', [today]) : [];
+  res.json({ appName: APP_NAME, here, today, timezone: TZ, checkoutTime: CHECKOUT_LABEL, venues, me: req.admin,
+    stats: { listed, present: t.present || 0, stillIn: t.still_in || 0, out: t.out || 0, absent: listed ? absent.length : null },
+    absent });
 }));
 
 app.post('/api/admin/venues', needAdmin, h(async (req, res) => {
@@ -294,7 +362,7 @@ app.get('/admin/attendance.csv', h(async (req, res) => {
   const hours = (r) => (r.checkout_at ? ((r.checkout_at - r.at) / 36e5).toFixed(2) : '');
   const lines = [['Date', 'Time in', 'Time out', 'Hours', 'Name', 'PBAT-D2D number', 'Office', 'Note'].map(cell).join(',')]
     .concat(rows.map((r) => [r.day, time.format(new Date(r.at)), r.checkout_at ? time.format(new Date(r.checkout_at)) : '', hours(r),
-      r.name, r.member_no, r.venue, [r.by_admin ? 'By admin' : '', r.new_device ? 'New phone' : ''].filter(Boolean).join(', ')].map(cell).join(',')));
+      r.name, r.member_no, r.venue, [r.by_admin ? `By ${r.by_name || 'admin'}` : '', r.new_device ? 'New phone' : ''].filter(Boolean).join(', ')].map(cell).join(',')));
   res.set('Content-Type', 'text/csv; charset=utf-8')
     .set('Content-Disposition', `attachment; filename="attendance-${from}${to !== from ? `-to-${to}` : ''}.csv"`)
     .send(`﻿${lines.join('\r\n')}`);
@@ -326,7 +394,7 @@ app.get('/admin/attendance.xlsx', h(async (req, res) => {
       day: r.day, name: r.name, no: r.member_no, office: r.venue,
       in: time.format(new Date(r.at)), out: r.checkout_at ? time.format(new Date(r.checkout_at)) : '',
       hours: r.checkout_at ? Math.round(((r.checkout_at - r.at) / 36e5) * 100) / 100 : null,
-      note: [r.by_admin ? 'By admin' : '', r.checkout_at ? '' : 'No check-out'].filter(Boolean).join(', '),
+      note: [r.by_admin ? `By ${r.by_name || 'admin'}` : '', r.checkout_at ? '' : 'No check-out'].filter(Boolean).join(', '),
     });
     row.getCell('hours').numFmt = '0.00';
   }
@@ -369,7 +437,7 @@ app.get('/admin/attendance.pdf', h(async (req, res) => {
     ['Date', 0.12, (r) => longDay(r.day)], ['Name', 0.21, (r) => r.name], ['PBAT-D2D no.', 0.16, (r) => r.member_no],
     ['Office', 0.18, (r) => r.venue], ['In', 0.07, (r) => time.format(new Date(r.at))],
     ['Out', 0.07, (r) => (r.checkout_at ? time.format(new Date(r.checkout_at)) : '-')], ['Hours', 0.08, hrs],
-    ['Note', 0.11, (r) => [r.by_admin ? 'By admin' : '', r.new_device ? 'New phone' : ''].filter(Boolean).join(', ')],
+    ['Note', 0.11, (r) => [r.by_admin ? `By ${r.by_name || 'admin'}` : '', r.new_device ? 'New phone' : ''].filter(Boolean).join(', ')],
   ].map(([h, w, f]) => ({ h, w: w * W, f }));
 
   const header = () => {
@@ -424,8 +492,8 @@ app.post('/api/admin/people/:id/sign', needAdmin, h(async (req, res) => {
   const today = dayOf(), now = Date.now();
   const row = await db.one('checkedIn', [person.id, venue.id, today]);
   let action;
-  if (!row) { await db.q('adminCheckIn', [person.id, venue.id, today, now]); action = 'in'; }
-  else if (!row.checkout_at) { await db.q('adminCheckOut', [person.id, venue.id, today, now]); action = 'out'; }
+  if (!row) { await db.q('adminCheckIn', [person.id, venue.id, today, now, req.admin.name]); action = 'in'; }
+  else if (!row.checkout_at) { await db.q('adminCheckOut', [person.id, venue.id, today, now, req.admin.name]); action = 'out'; }
   else action = 'already-out';
   res.json({ ok: true, action, name: person.name, venue: venue.name });
 }));

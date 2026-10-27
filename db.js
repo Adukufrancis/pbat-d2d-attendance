@@ -39,9 +39,18 @@ const SCHEMA = (big, idDef) => `
     new_device  INTEGER NOT NULL DEFAULT 0,
     checkout_at ${big},
     by_admin    INTEGER NOT NULL DEFAULT 0,
+    by_name     TEXT,
     UNIQUE (person_id, venue_id, day)
   );
   CREATE INDEX IF NOT EXISTS attendance_day_idx ON attendance(day, venue_id);
+  CREATE TABLE IF NOT EXISTS admins (
+    id          ${idDef},
+    name        TEXT NOT NULL,
+    username    TEXT NOT NULL UNIQUE,
+    salt        TEXT NOT NULL,
+    hash        TEXT NOT NULL,
+    created_at  ${big} NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -85,17 +94,28 @@ const Q = {
              (SELECT COUNT(*) FROM attendance a WHERE a.person_id = p.id AND a.day = $1 AND a.checkout_at IS NULL) AS today_open
            FROM people p ORDER BY p.name`,
   personById: 'SELECT id, name, member_no, listed FROM people WHERE id = $1',
-  adminCheckIn: `INSERT INTO attendance (person_id, venue_id, day, at, ip, new_device, by_admin) VALUES ($1, $2, $3, $4, 'admin', 0, 1)
+  adminCheckIn: `INSERT INTO attendance (person_id, venue_id, day, at, ip, new_device, by_admin, by_name) VALUES ($1, $2, $3, $4, 'admin', 0, 1, $5)
                  ON CONFLICT (person_id, venue_id, day) DO NOTHING`,
-  adminCheckOut: `UPDATE attendance SET checkout_at = $4, by_admin = 1
+  adminCheckOut: `UPDATE attendance SET checkout_at = $4, by_admin = 1,
+                    by_name = CASE WHEN by_name IS NULL OR by_name = '' THEN $5 WHEN by_name = $5 THEN by_name ELSE by_name || ', ' || $5 END
                   WHERE person_id = $1 AND venue_id = $2 AND day = $3 AND checkout_at IS NULL`,
+  admins: 'SELECT id, name, username, salt, hash, created_at FROM admins ORDER BY name',
+  addAdmin: 'INSERT INTO admins (name, username, salt, hash, created_at) VALUES ($1, $2, $3, $4, $5)',
+  deleteAdmin: 'DELETE FROM admins WHERE id = $1',
+  setAdminPw: 'UPDATE admins SET salt = $2, hash = $3 WHERE id = $1',
+  todayTotals: `SELECT COUNT(DISTINCT person_id) AS present,
+                  COUNT(*) - COUNT(checkout_at) AS still_in, COUNT(checkout_at) AS out
+                FROM attendance WHERE day = $1`,
+  absentToday: `SELECT p.id, p.name, p.member_no FROM people p
+                WHERE p.listed = 1 AND NOT EXISTS (SELECT 1 FROM attendance a WHERE a.person_id = p.id AND a.day = $1)
+                ORDER BY p.name`,
 
   checkedIn: 'SELECT at, checkout_at FROM attendance WHERE person_id = $1 AND venue_id = $2 AND day = $3',
   checkOut: `UPDATE attendance SET checkout_at = $4
              WHERE person_id = $1 AND venue_id = $2 AND day = $3 AND checkout_at IS NULL`,
   checkIn: `INSERT INTO attendance (person_id, venue_id, day, at, ip, new_device) VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (person_id, venue_id, day) DO NOTHING`,
-  attendanceFor: `SELECT a.id, a.at, a.checkout_at, a.day, a.new_device, a.by_admin, a.venue_id, v.name AS venue, p.id AS person_id, p.name, p.member_no
+  attendanceFor: `SELECT a.id, a.at, a.checkout_at, a.day, a.new_device, a.by_admin, a.by_name, a.venue_id, v.name AS venue, p.id AS person_id, p.name, p.member_no
                   FROM attendance a JOIN people p ON p.id = a.person_id JOIN venues v ON v.id = a.venue_id
                   WHERE a.day >= $1 AND a.day <= $2 AND ($3 = 0 OR a.venue_id = $3)
                   ORDER BY a.day DESC, a.at ASC`,
@@ -108,7 +128,7 @@ const Q = {
 };
 
 const NUMERIC = new Set(['id', 'venue_id', 'person_id', 'created_at', 'at', 'networks', 'devices', 'days',
-  'last_seen', 'n', 'out', 'new_device', 'checkout_at', 'listed', 'by_admin', 'today_in', 'today_out', 'today_open']);
+  'last_seen', 'n', 'out', 'new_device', 'checkout_at', 'listed', 'by_admin', 'today_in', 'today_out', 'today_open', 'present', 'still_in']);
 const fix = (r) => { for (const k of Object.keys(r)) if (NUMERIC.has(k) && r[k] != null) r[k] = Number(r[k]); return r; };
 
 async function postgres(url) {
@@ -121,6 +141,7 @@ async function postgres(url) {
   await pool.query('ALTER TABLE attendance ADD COLUMN IF NOT EXISTS checkout_at BIGINT');   // check-out (added later)
   await pool.query('ALTER TABLE people ADD COLUMN IF NOT EXISTS listed INTEGER NOT NULL DEFAULT 0');   // office list
   await pool.query('ALTER TABLE attendance ADD COLUMN IF NOT EXISTS by_admin INTEGER NOT NULL DEFAULT 0');   // signed in by admin
+  await pool.query('ALTER TABLE attendance ADD COLUMN IF NOT EXISTS by_name TEXT');   // which admin
   return { kind: 'postgres', q: async (name, params = []) => (await pool.query(Q[name], params)).rows.map(fix) };
 }
 
@@ -133,6 +154,7 @@ async function sqlite(file) {
   try { db.exec('ALTER TABLE attendance ADD COLUMN checkout_at INTEGER'); } catch {}     // check-out (added later)
   try { db.exec('ALTER TABLE people ADD COLUMN listed INTEGER NOT NULL DEFAULT 0'); } catch {}   // office list
   try { db.exec('ALTER TABLE attendance ADD COLUMN by_admin INTEGER NOT NULL DEFAULT 0'); } catch {}   // signed in by admin
+  try { db.exec('ALTER TABLE attendance ADD COLUMN by_name TEXT'); } catch {}   // which admin
   const cache = {};
   return {
     kind: 'sqlite',
