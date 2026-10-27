@@ -20,21 +20,27 @@ function state(kind, title, text, actions = '') {
 
 const time = (t, tz) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: tz });
 
-function registerForm(venueName, prev = {}) {
+function registerForm(venueName, f = { prefix: 'PBAT-D2D-2027-', digits: 4 }) {
   view.innerHTML = `<form class="register" novalidate>
     <p class="kicker">${esc(venueName)}</p>
     <h1>First time here?</h1>
     <p class="muted">Enter your name and PBAT-D2D number once. Next time, one scan checks you in.</p>
     <label class="field" data-f="name"><span>Full name</span>
-      <input name="name" autocomplete="name" value="${esc(prev.name)}" required><em class="err"></em></label>
-    <label class="field" data-f="number"><span>PBAT-D2D number</span>
-      <input name="number" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. PBAT-D2D-00123" value="${esc(prev.number)}" required><em class="err"></em></label>
+      <input name="name" autocomplete="name" required><em class="err"></em></label>
+    <label class="field" data-f="number"><span>PBAT-D2D number <small class="hint">last ${f.digits} digits</small></span>
+      <span class="prefixed"><b aria-hidden="true">${esc(f.prefix)}</b>
+      <input name="number" inputmode="numeric" pattern="[0-9]*" maxlength="${f.digits}" autocomplete="off"
+        placeholder="${'0'.repeat(f.digits)}" aria-label="Last ${f.digits} digits of your PBAT-D2D number" required></span><em class="err"></em></label>
     <button class="btn block" type="submit">Check me in</button>
     <p class="msg err" hidden></p>
     <p class="fine">This phone will be linked to you, so please don't check in for anyone else.</p>
   </form>`;
   const form = $('form', view);
   form.name.focus();
+  // digits only, and jump to the button once all digits are in
+  form.number.addEventListener('input', () => {
+    form.number.value = form.number.value.replace(/\D/g, '').slice(0, f.digits);
+  });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     run({ name: form.name.value.trim(), number: form.number.value.trim() }, form);
@@ -47,7 +53,7 @@ async function run(extra = {}, form = null) {
   const { ok, data } = await api('/api/checkin', { venue, code, ...extra });
   if (btn) { btn.disabled = false; btn.textContent = 'Check me in'; }
 
-  if (ok && data.status === 'register') return registerForm(data.venue);
+  if (ok && data.status === 'register') return registerForm(data.venue, data.form);
   if (ok && data.status === 'ok') {
     const first = esc(data.name.split(' ')[0]), place = `<b>${esc(data.venue)}</b>`;
     const tIn = `<b>${time(data.at, data.timezone)}</b>`, tOut = data.outAt ? `<b>${time(data.outAt, data.timezone)}</b>` : '';

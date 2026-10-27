@@ -95,10 +95,16 @@ function clientIp(req) {
   return pick('cf-connecting-ip') || pick('true-client-ip') || req.ip;
 }
 
-/** PBAT-D2D membership number: case and spaces don't matter ("pbat-d2d 0012" = "PBAT-D2D0012"). */
+// PBAT-D2D numbers are NUMBER_PREFIX + NUMBER_DIGITS digits, e.g. PBAT-D2D-2027-0123.
+// People only type the digits; the prefix is shown already filled in.
+const NUMBER_PREFIX = (process.env.NUMBER_PREFIX ?? 'PBAT-D2D-2027-').toUpperCase();
+const NUMBER_DIGITS = Number(process.env.NUMBER_DIGITS || 4);
+/** "0123" -> "PBAT-D2D-2027-0123". A full number typed or pasted in is accepted too. */
 function normalizeNumber(raw) {
-  const n = String(raw || '').toUpperCase().replace(/\s+/g, '').replace(/[–—_]/g, '-');
-  return /^[A-Z0-9][A-Z0-9\-\/.]{1,29}$/.test(n) && /\d/.test(n) ? n : null;
+  let n = String(raw || '').toUpperCase().replace(/\s+/g, '').replace(/[–—_]/g, '-');
+  const strip = (s) => s.replace(/[^A-Z0-9]/g, '');
+  if (strip(n).startsWith(strip(NUMBER_PREFIX))) n = strip(n).slice(strip(NUMBER_PREFIX).length);
+  return new RegExp(`^\\d{${NUMBER_DIGITS}}$`).test(n) ? NUMBER_PREFIX + n : null;
 }
 
 const baseUrl = (req) => (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
@@ -288,11 +294,12 @@ app.post('/api/checkin', h(async (req, res) => {
   if (!person) {
     const name = String(req.body.name || '').trim().replace(/\s+/g, ' ').slice(0, 80);
     const number = normalizeNumber(req.body.number);
-    if (!req.body.name && !req.body.number) return res.json({ status: 'register', venue: venue.name });
+    const form = { prefix: NUMBER_PREFIX, digits: NUMBER_DIGITS };
+    if (!req.body.name && !req.body.number) return res.json({ status: 'register', venue: venue.name, form });
     const fields = {};
     if (name.length < 2) fields.name = 'Enter your full name.';
-    if (!number) fields.number = 'Enter your PBAT-D2D number as it appears on your ID card.';
-    if (Object.keys(fields).length) return res.status(400).json({ status: 'register', fields, error: 'Please fix the highlighted fields.' });
+    if (!number) fields.number = `Enter the last ${NUMBER_DIGITS} digits of your PBAT-D2D number.`;
+    if (Object.keys(fields).length) return res.status(400).json({ status: 'register', fields, form, error: 'Please fix the highlighted fields.' });
 
     person = await db.one('personByNumber', [number]);
     if (person) {

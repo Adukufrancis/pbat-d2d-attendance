@@ -4,7 +4,7 @@ QR attendance that only works on the venue's WiFi.
 
 - **Organiser** (`/admin`): log in with `ADMIN_PASSWORD`, add venues, and at each venue tap **Use this network** while connected to its WiFi.
 - **QR screen** (`/admin/display/<venue>`): shows today's code. It changes every day at midnight (`TIMEZONE`, default Africa/Lagos). Leave it on a TV/laptop, or print it each morning.
-- **Attendees** scan the code with their phone camera. The first time they add their name and PBAT-D2D number; after that one scan checks them in. A scan only counts if the phone is on the venue's WiFi, the code is today's, and they haven't already checked in there today.
+- **Attendees** scan the code with their phone camera. The first time they add their name and the last 4 digits of their PBAT-D2D number (`PBAT-D2D-2027-` is filled in; change it with `NUMBER_PREFIX` / `NUMBER_DIGITS`); after that one scan checks them in. A scan only counts if the phone is on the venue's WiFi, the code is today's, and they haven't already checked in there today.
 
 ## How the WiFi check works
 Websites can't see a phone's WiFi name, so the app uses the venue's **internet address**: every phone on the same WiFi reaches the internet through the same router, so they share one public IPv4 address (or IPv6 /64 prefix). "Use this network" saves it; check-ins from any other address (mobile data, home WiFi) are refused.
