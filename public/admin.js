@@ -1,4 +1,4 @@
-import { $, $$, api, esc, toast } from '/common.js';
+import { $, $$, api, esc, toast, EYE } from '/common.js';
 
 let S = null;                       // dashboard state from the server
 const fmtDay = (d, opts = { weekday: 'long', day: 'numeric', month: 'long' }) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, opts);
@@ -15,6 +15,7 @@ async function call(path, body) {
 // ---- Small dialog helper ----
 function ask({ title, text = '', input = null, ok = 'Save', danger = false }) {
   const dlg = $('#dlg'), form = $('#dlg-form');
+  form.onkeydown = null;
   form.innerHTML = `<h3>${esc(title)}</h3>${text ? `<p class="muted">${text}</p>` : ''}
     ${input ? `<label class="field"><span>${esc(input.label)}</span><input id="dlg-in" value="${esc(input.value || '')}" placeholder="${esc(input.placeholder || '')}" required></label>` : ''}
     ${input?.check ? `<label class="check"><input type="checkbox" id="dlg-check" ${input.check.on ? 'checked' : ''}> ${input.check.label}</label>` : ''}
@@ -55,7 +56,7 @@ function renderVenues() {
     return `<article class="venue" data-id="${v.id}">
       <div class="venue-top">
         <div><h3>${esc(v.name)}</h3><p class="muted">${v.networks.length ? `${v.networks.length} WiFi network${v.networks.length > 1 ? 's' : ''} saved` : '<span class="bad">No WiFi saved yet: check-ins are refused</span>'}</p></div>
-        <div class="big-count"><b>${v.today}</b><span>today</span></div>
+        <div class="big-count"><b>${v.today}</b><span>in today</span>${v.out ? `<small>${v.out} out</small>` : ''}</div>
       </div>
       <div class="venue-actions">
         <a class="btn" href="/admin/display/${v.id}">Show QR code</a>
@@ -114,9 +115,10 @@ async function loadRecords() {
   const t = $('#records');
   if (!records.length) { t.innerHTML = '<tbody><tr><td class="empty-row">No check-ins for these dates.</td></tr></tbody>'; return; }
   const multiDay = $('#from').value !== $('#to').value;
-  t.innerHTML = `<thead><tr>${multiDay ? '<th>Date</th>' : ''}<th>Time</th><th>Name</th><th>PBAT-D2D no.</th><th>Office</th><th></th></tr></thead><tbody>${
+  t.innerHTML = `<thead><tr>${multiDay ? '<th>Date</th>' : ''}<th>In</th><th>Out</th><th>Hours</th><th>Name</th><th>PBAT-D2D no.</th><th>Office</th><th></th></tr></thead><tbody>${
     records.map((x) => `<tr data-id="${x.id}">${multiDay ? `<td>${fmtDay(x.day, { day: 'numeric', month: 'short' })}</td>` : ''}
-      <td>${fmtTime(x.at)}</td><td><b>${esc(x.name)}</b>${x.new_device ? ' <span class="pill warn" title="This PBAT-D2D number checked in from a phone it had not used before">new phone</span>' : ''}</td>
+      <td>${fmtTime(x.at)}</td><td>${x.checkout_at ? fmtTime(x.checkout_at) : '<span class="muted-dash">not yet</span>'}</td>
+      <td>${x.checkout_at ? (() => { const m = Math.round((x.checkout_at - x.at) / 60000); return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`; })() : '-'}</td><td><b>${esc(x.name)}</b>${x.new_device ? ' <span class="pill warn" title="This PBAT-D2D number checked in from a phone it had not used before">new phone</span>' : ''}</td>
       <td>${esc(x.member_no)}</td><td>${esc(x.venue)}</td>
       <td><button class="linkish danger" data-del>Remove</button></td></tr>`).join('')}</tbody>`;
 }
@@ -186,6 +188,33 @@ function show(tab) {
 }
 $$('[role=tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
 $('#logout').addEventListener('click', async () => { await api('/api/admin/logout', {}); location.reload(); });
+
+// ---- Change password ----
+$('#change-pw').addEventListener('click', () => {
+  const dlg = $('#dlg'), form = $('#dlg-form');
+  const pw = (id, label, auto) => `<label class="field" data-f="${id}"><span>${label}</span><span class="pw-wrap">
+    <input id="${id}" type="password" autocomplete="${auto}" required>${EYE}</span><em class="err"></em></label>`;
+  form.innerHTML = `<h3>Change password</h3><p class="muted">Other devices logged in to this dashboard will be logged out.</p>
+    ${pw('pw-current', 'Current password', 'current-password')}${pw('pw-next', 'New password (at least 8 characters)', 'new-password')}
+    ${pw('pw-again', 'Type the new password again', 'new-password')}
+    <div class="dlg-actions"><button class="btn" id="pw-save" type="button">Change password</button>
+    <button class="btn ghost" value="cancel" formnovalidate>Cancel</button></div>`;
+  dlg.onclose = null; dlg.showModal(); $('#pw-current').focus();
+  const err = (id, text) => { const f = $(`[data-f="${id}"]`); f.classList.toggle('invalid', Boolean(text)); $('.err', f).textContent = text || ''; };
+  const save = async () => {
+    ['pw-current', 'pw-next', 'pw-again'].forEach((id) => err(id));
+    const current = $('#pw-current').value, next = $('#pw-next').value;
+    if (next.length < 8) return err('pw-next', 'Use at least 8 characters.');
+    if (next !== $('#pw-again').value) return err('pw-again', "The two new passwords don't match.");
+    const btn = $('#pw-save'); btn.disabled = true;
+    const r = await api('/api/admin/password', { current, next });
+    btn.disabled = false;
+    if (!r.ok) return err(r.data.field === 'current' ? 'pw-current' : 'pw-next', r.data.error || 'Something went wrong.');
+    dlg.close(); toast('✓ Password changed');
+  };
+  $('#pw-save').addEventListener('click', save);
+  form.onkeydown = (e) => { if (e.key === 'Enter' && e.target.matches('input')) { e.preventDefault(); save(); } };
+});
 
 await loadState();
 $('#from').value = $('#to').value = S.today;

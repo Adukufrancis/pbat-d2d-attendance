@@ -14,8 +14,10 @@ async function load() {
     document.title = `${data.name} · QR screen`;
     $('#d-date').textContent = new Date(`${data.day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   }
-  const c = $('#d-count');
-  if (c.textContent !== String(data.count)) { c.textContent = data.count; c.parentElement.classList.remove('bump'); void c.offsetWidth; c.parentElement.classList.add('bump'); }
+  for (const [el, n] of [[$('#d-count'), data.count], [$('#d-out'), data.out]]) {
+    if (el.textContent !== String(n)) { el.textContent = n; el.parentElement.classList.remove('bump'); void el.offsetWidth; el.parentElement.classList.add('bump'); }
+  }
+  $('#d-out-time').textContent = data.checkoutTime;
   $('#d-warn').hidden = data.networks > 0;
 }
 

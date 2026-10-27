@@ -6,6 +6,7 @@ const view = $('#view');
 
 const ICONS = {
   ok: '<svg viewBox="0 0 48 48"><path d="M14 25l7 7 14-15"/></svg>',
+  out: '<svg viewBox="0 0 48 48"><path d="M20 12h-6a2 2 0 00-2 2v20a2 2 0 002 2h6M28 17l7 7-7 7M35 24H19"/></svg>',
   wifi: '<svg viewBox="0 0 48 48"><path d="M8 19a23 23 0 0132 0M14 25a14 14 0 0120 0M20 31a6 6 0 018 0"/><circle cx="24" cy="37" r="1.6"/></svg>',
   clock: '<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="16"/><path d="M24 15v10l6 4"/></svg>',
   x: '<svg viewBox="0 0 48 48"><path d="M16 16l16 16M32 16L16 32"/></svg>',
@@ -13,7 +14,7 @@ const ICONS = {
 
 function state(kind, title, text, actions = '') {
   view.innerHTML = `<div class="state ${kind}">
-    <div class="state-icon">${ICONS[{ ok: 'ok', network: 'wifi', expired: 'clock' }[kind] || 'x']}</div>
+    <div class="state-icon">${ICONS[{ ok: 'ok', out: 'out', network: 'wifi', expired: 'clock' }[kind] || 'x']}</div>
     <h1>${title}</h1><p class="muted">${text}</p>${actions}</div>`;
 }
 
@@ -48,9 +49,15 @@ async function run(extra = {}, form = null) {
 
   if (ok && data.status === 'register') return registerForm(data.venue);
   if (ok && data.status === 'ok') {
-    return state('ok', data.already ? "You're already checked in" : `Welcome, ${esc(data.name.split(' ')[0])}!`,
-      `${data.already ? 'You checked in' : 'Checked in'} at <b>${esc(data.venue)}</b> at <b>${time(data.at, data.timezone)}</b>.`,
-      `<p class="fine">Signed in as ${esc(data.name)}${data.number ? ` · ${esc(data.number)}` : ''}. Not you? Tell the office admin.</p>`);
+    const first = esc(data.name.split(' ')[0]), place = `<b>${esc(data.venue)}</b>`;
+    const tIn = `<b>${time(data.at, data.timezone)}</b>`, tOut = data.outAt ? `<b>${time(data.outAt, data.timezone)}</b>` : '';
+    const who = `<p class="fine">Signed in as ${esc(data.name)}${data.number ? ` · ${esc(data.number)}` : ''}. Not you? Tell the office admin.</p>`;
+    const hours = data.outAt ? (() => { const m = Math.round((data.outAt - data.at) / 60000); return `${Math.floor(m / 60)}h ${m % 60}m`; })() : '';
+    const later = `<p class="note">Leaving? Scan again from <b>${esc(data.checkoutTime)}</b> to check out.</p>`;
+    if (data.action === 'out') return state('out', `Goodbye, ${first}!`, `Checked out of ${place} at ${tOut}.<br>You were in from ${tIn} (${hours}).`, who);
+    if (data.action === 'already-out') return state('out', "You've already checked out", `You checked out of ${place} at ${tOut} today.`, who);
+    if (data.action === 'already-in') return state('ok', "You're already checked in", `You checked in at ${place} at ${tIn}.`, later + who);
+    return state('ok', `Welcome, ${first}!`, `Checked in at ${place} at ${tIn}.`, (data.checkoutOpen ? `<p class="note">It's after ${esc(data.checkoutTime)}: scan again when you leave to check out.</p>` : later) + who);
   }
   if (form && data.fields) {
     for (const f of ['name', 'number']) {
