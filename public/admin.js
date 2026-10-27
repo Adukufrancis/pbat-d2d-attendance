@@ -213,7 +213,8 @@ $('#add-person').addEventListener('click', () => {
 });
 
 // Upload the office list: preview first, then save
-$('#upload-list').addEventListener('click', () => $('#list-file').click());
+// The button is a <label for="list-file">, so the browser opens the file picker itself (works in Safari too).
+$('#upload-list').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#list-file').click(); } });
 $('#list-file').addEventListener('change', async (e) => {
   const file = e.target.files[0]; e.target.value = '';
   if (!file) return;

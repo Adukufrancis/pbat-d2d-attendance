@@ -16,6 +16,7 @@ async function readXlsx(buf) {
   return rows;
 }
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDb } from './db.js';
@@ -149,6 +150,21 @@ app.use(cookieParser());
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+// Every deploy gets its own version id. Pages load /admin.js?v=<id>, and imports inside scripts
+// are rewritten to /common.js?v=<id>, so a browser can never mix old and new files after an update.
+const BUILD = (process.env.RENDER_GIT_COMMIT || String(Date.now())).slice(0, 12);
+const jsCache = new Map();
+app.get(/^\/[\w-]+\.js$/, (req, res, next) => {
+  const file = path.join(__dirname, 'public', path.basename(req.path));
+  let src = jsCache.get(file);
+  if (src === undefined) {
+    try { src = fs.readFileSync(file, 'utf8').replace(/from '(\/[\w-]+\.js)'/g, `from '$1?v=${BUILD}'`); } catch { src = null; }
+    jsCache.set(file, src);
+  }
+  if (src == null) return next();
+  res.type('application/javascript').set('Cache-Control', req.query.v ? 'public, max-age=31536000, immutable' : 'no-cache').send(src);
+});
+
 // Scripts and styles: browsers must check for a newer version every time (cheap 304 if unchanged),
 // so updates show up immediately. Images and icons can be kept for a day.
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -534,12 +550,12 @@ app.post('/api/checkin', h(async (req, res) => {
 
 // ---- Pages -------------------------------------------------------------------------
 const send = (res, html) => res.set('Cache-Control', 'no-store').type('html').send(html);
-app.get('/', (req, res) => send(res, page(PAGES.home, { appName: APP_NAME })));
-app.get('/c/:venue/:code', (req, res) => send(res, page(PAGES.checkin, { appName: APP_NAME,
+app.get('/', (req, res) => send(res, page(PAGES.home, { v: BUILD, appName: APP_NAME })));
+app.get('/c/:venue/:code', (req, res) => send(res, page(PAGES.checkin, { v: BUILD, appName: APP_NAME,
   venue: req.params.venue, code: req.params.code })));
-app.get('/admin', (req, res) => send(res, page(isAdmin(req) ? PAGES.admin : PAGES.login, { appName: APP_NAME })));
+app.get('/admin', (req, res) => send(res, page(isAdmin(req) ? PAGES.admin : PAGES.login, { v: BUILD, appName: APP_NAME })));
 app.get('/admin/display/:id', (req, res) => (isAdmin(req)
-  ? send(res, page(PAGES.display, { appName: APP_NAME, venue: req.params.id })) : res.redirect('/admin')));
+  ? send(res, page(PAGES.display, { v: BUILD, appName: APP_NAME, venue: req.params.id })) : res.redirect('/admin')));
 
 app.use((err, req, res, next) => {
   console.error(err);

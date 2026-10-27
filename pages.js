@@ -12,11 +12,11 @@ const shell = (title, body, { script = '', bodyClass = '' } = {}) => `<!doctype 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/styles.css?v={{v}}">
 </head>
 <body class="${bodyClass}">
 ${body}
-${script ? `<script type="module" src="${script}"></script>` : ''}
+${script ? `<script type="module" src="${script}?v={{v}}"></script>` : ''}
 </body>
 </html>`;
 
@@ -115,9 +115,9 @@ export const PAGES = {
     <div class="panel-head">
       <div><h2>People</h2><p class="muted" id="people-summary"></p></div>
       <div class="people-actions">
-        <button class="btn ghost" id="upload-list">Upload office list</button>
+        <label class="btn ghost" id="upload-list" for="list-file" role="button" tabindex="0">Upload office list</label>
+        <input type="file" id="list-file" class="file-hidden" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv">
         <button class="btn" id="add-person">+ Add person</button>
-        <input type="file" id="list-file" accept=".xlsx,.csv" hidden>
       </div>
     </div>
     <div class="list-banner" id="list-banner"></div>

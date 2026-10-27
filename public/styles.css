@@ -236,3 +236,7 @@ body.dark { background: var(--green-deep); color: #fff; }
 .skipped { font-size: 13px; margin-top: 8px; }
 .skipped ul { max-height: 160px; overflow: auto; padding-left: 18px; margin: 8px 0 0; }
 .skipped em { color: var(--warn); font-style: normal; font-weight: 600; margin-left: 4px; }
+
+/* File box kept in the page (not display:none) so every browser lets the label open it */
+.file-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+label.btn { cursor: pointer; }
