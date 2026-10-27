@@ -243,3 +243,15 @@ label.btn { cursor: pointer; }
 
 .pill { background: #eef0ec; color: var(--ink); }
 .row-actions .btn.small { margin-right: 6px; padding: 6px 12px; }
+
+/* Download dropdown */
+.dropdown { position: relative; }
+.dropdown summary { list-style: none; }
+.dropdown summary::-webkit-details-marker { display: none; }
+.dropdown summary svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s; }
+.dropdown[open] summary svg { transform: rotate(180deg); }
+.dropdown .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 240px; background: #fff; border-radius: 14px; padding: 6px; box-shadow: 0 18px 40px -12px rgba(6,40,22,.35), 0 0 0 1px var(--line); }
+.dropdown .menu a { display: grid; padding: 10px 12px; border-radius: 10px; text-decoration: none; color: var(--ink); }
+.dropdown .menu a:hover { background: var(--mint-soft); }
+.dropdown .menu a b { font-size: 14px; }
+.dropdown .menu a span { font-size: 12px; color: var(--muted); }

@@ -95,7 +95,14 @@ export const PAGES = {
   <section data-panel="records" hidden>
     <div class="panel-head">
       <div><h2>Attendance</h2><p class="muted" id="rec-summary"></p></div>
-      <div class="people-actions"><a class="btn" id="xlsx" href="#">Download Excel</a><a class="btn ghost" id="pdf" href="#">Download PDF</a></div>
+      <details class="dropdown" id="download">
+        <summary class="btn">Download <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></summary>
+        <div class="menu" role="menu">
+          <a role="menuitem" id="xlsx" href="#"><b>Excel</b><span>.xlsx with a summary sheet</span></a>
+          <a role="menuitem" id="pdf" href="#"><b>PDF</b><span>Printable report</span></a>
+          <a role="menuitem" id="csv" href="#"><b>CSV</b><span>Plain data for other apps</span></a>
+        </div>
+      </details>
     </div>
     <div class="filters">
       <label class="field small"><span>From</span><input type="date" id="from"></label>

@@ -108,6 +108,7 @@ let records = [];
 async function loadRecords() {
   const q = new URLSearchParams({ from: $('#from').value, to: $('#to').value, venue: $('#venue-filter').value });
   $('#pdf').href = `/admin/attendance.pdf?${q}`;
+  $('#csv').href = `/admin/attendance.csv?${q}`;
   $('#xlsx').href = `/admin/attendance.xlsx?${q}`;
   const r = await call(`/api/admin/attendance?${q}`); if (!r.ok) return;
   records = r.data.rows;
@@ -314,3 +315,7 @@ await loadState();
 $('#from').value = $('#to').value = S.today;
 show(['records', 'people'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'today');
 setInterval(() => { if (!$('[data-panel=today]').hidden && !$('#dlg').open) loadState(); }, 20000);
+
+// Download menu: close after choosing, or when clicking elsewhere
+$('#download').addEventListener('click', (e) => { if (e.target.closest('.menu a')) setTimeout(() => $('#download').removeAttribute('open'), 50); });
+document.addEventListener('click', (e) => { if (!e.target.closest('#download')) $('#download').removeAttribute('open'); });
