@@ -1,0 +1,22 @@
+{
+  "name": "attendance",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "QR attendance that only works on the venue's WiFi",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "compression": "^1.8.2",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^18.0.9",
+    "express": "^4.22.3",
+    "pg": "^8.23.1",
+    "qrcode": "^1.5.4"
+  }
+}

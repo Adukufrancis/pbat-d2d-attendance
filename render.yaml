@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: pbat-d2d-attendance
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: APP_NAME
+        value: PBAT D2D Office Attendance
+      - key: TIMEZONE
+        value: Africa/Lagos
+      - key: SECRET
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DATABASE_URL
+        sync: false
