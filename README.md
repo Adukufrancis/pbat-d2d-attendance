@@ -51,3 +51,9 @@ Once the list has anyone on it:
 
 ## Signing someone in from the dashboard
 For people without a smartphone: **People → Sign in** (and later **Sign out**) next to their name. It records the current time at the chosen office and is marked **by admin** in the attendance list, Excel and CSV.
+
+## Admins
+The main admin logs in with username **admin** and the main password. From the name menu (top right) → **Manage admins**, add each admin with their own name, username and password, reset a password, or remove an admin (they're logged out at once). Each admin can change their own password. Sign-ins done from the dashboard show **by <admin name>** in the list and downloads.
+
+## Today at a glance
+The Today tab shows: present today, still in the office, checked out, and not in yet, plus a **Not in yet** list of everyone on the office list who hasn't checked in, each with a **Sign in** button.

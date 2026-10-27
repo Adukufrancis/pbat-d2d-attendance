@@ -62,6 +62,7 @@ export const PAGES = {
     ${brand}
     <h1>Office admin login</h1>
     <p class="muted">Manage offices, show today's QR code and see who came in.</p>
+    <label class="field"><span>Username</span><input id="username" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="admin"></label>
     <label class="field"><span>Password</span><span class="pw-wrap"><input id="password" type="password" autocomplete="current-password" required><button type="button" class="eye" data-eye aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="M4 4l16 16"/></svg></button></span></label>
     <button class="btn block" type="submit">Log in</button>
     <p class="msg err" id="err" hidden></p>
@@ -77,19 +78,35 @@ export const PAGES = {
       <button role="tab" data-tab="records">Attendance</button>
       <button role="tab" data-tab="people">People</button>
     </nav>
-    <div class="top-actions"><button class="btn ghost small" id="change-pw">Change password</button>
-    <button class="btn ghost small" id="logout">Log out</button></div>
+    <details class="dropdown me-menu" id="me-menu">
+      <summary class="me-chip"><span class="avatar" id="me-avatar">A</span><span class="me-name" id="me-name">Admin</span>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></summary>
+      <div class="menu" role="menu">
+        <p class="menu-head" id="me-head"></p>
+        <a href="#" role="menuitem" id="manage-admins" hidden><b>Manage admins</b><span>Add or remove admin logins</span></a>
+        <a href="#" role="menuitem" id="change-pw"><b>Change password</b><span>Your own login</span></a>
+        <a href="#" role="menuitem" id="logout"><b>Log out</b><span>This device</span></a>
+      </div>
+    </details>
   </div>
 </header>
 <main class="wrap dash">
   <section class="netbar" id="netbar"></section>
 
   <section data-panel="today">
+    <div class="stats" id="stats"></div>
     <div class="panel-head">
       <div><h2>Offices</h2><p class="muted" id="today-label"></p></div>
       <button class="btn" id="add-venue">+ Add office</button>
     </div>
     <div class="venues" id="venues"></div>
+    <section class="card absent-card" id="absent-card" hidden>
+      <div class="panel-head">
+        <div><h2>Not in yet</h2><p class="muted" id="absent-sub"></p></div>
+        <label class="field small search"><span class="sr">Search</span><input id="absent-search" placeholder="Search name or number"></label>
+      </div>
+      <div class="absent-list" id="absent-list"></div>
+    </section>
   </section>
 
   <section data-panel="records" hidden>

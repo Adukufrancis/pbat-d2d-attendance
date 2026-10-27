@@ -37,12 +37,54 @@ async function loadState() {
     <div><b>Your network right now:</b> <code>${esc(S.here)}</code>
     <span class="muted">${known.length ? `saved for ${known.map((v) => esc(v.name)).join(', ')}` : 'not saved for any venue'}</span></div>`;
   $('#today-label').textContent = fmtDay(S.today);
+  renderMe(); renderStats(); renderAbsent();
   renderVenues();
   const sel = $('#venue-filter'), cur = sel.value;
   sel.innerHTML = '<option value="0">All offices</option>' + S.venues.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
   sel.value = cur || '0';
   fancySelect(sel).render();
 }
+
+// ---- Who's logged in ----
+const initials = (n) => String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+function renderMe() {
+  const me = S.me || {};
+  $('#me-avatar').textContent = initials(me.name);
+  $('#me-name').textContent = me.name || 'Admin';
+  $('#me-head').innerHTML = `Logged in as <b>${esc(me.name)}</b><br><span>username: ${esc(me.username)}${me.main ? ' · main admin' : ''}</span>`;
+  $('#manage-admins').hidden = !me.main;
+}
+
+// ---- Today at a glance ----
+function renderStats() {
+  const s = S.stats, pct = s.listed ? Math.round((s.present / s.listed) * 100) : null;
+  const card = (cls, num, label, sub = '') => `<div class="stat ${cls}"><b>${num}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
+  $('#stats').innerHTML = [
+    card('present', s.present, 'Present today', pct != null ? `${pct}% of the list` : ''),
+    card('in', s.stillIn, 'Still in the office'),
+    card('out', s.out, 'Checked out'),
+    card('absent', s.absent == null ? '-' : s.absent, 'Not in yet', s.absent == null ? 'Upload the office list to see this' : `of ${s.listed} on the list`),
+  ].join('');
+}
+function renderAbsent() {
+  const card = $('#absent-card');
+  card.hidden = !S.stats.listed;
+  if (card.hidden) return;
+  const q = $('#absent-search').value.trim().toLowerCase();
+  const list = S.absent.filter((p) => !q || p.name.toLowerCase().includes(q) || p.member_no.toLowerCase().includes(q.replace(/\s/g, '')));
+  $('#absent-sub').textContent = S.absent.length ? `${S.absent.length} on the office list haven't checked in today` : 'Everyone on the list is in today 🎉';
+  $('#absent-list').innerHTML = list.map((p) => `<div class="absent-row" data-id="${p.id}">
+      <span class="avatar small">${esc(initials(p.name))}</span>
+      <div><b>${esc(p.name)}</b><span>${esc(p.member_no)}</span></div>
+      <button class="btn small ghost" data-sign>Sign in</button></div>`).join('')
+    || (S.absent.length ? '<p class="muted" style="padding:12px 4px">No matches.</p>' : '');
+}
+$('#absent-search').addEventListener('input', renderAbsent);
+$('#absent-list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sign]'); if (!b) return;
+  const p = S.absent.find((x) => String(x.id) === b.closest('[data-id]').dataset.id);
+  if (p) signFlow(p, false);
+});
 
 function renderVenues() {
   const box = $('#venues');
@@ -121,7 +163,7 @@ async function loadRecords() {
   t.innerHTML = `<thead><tr>${multiDay ? '<th>Date</th>' : ''}<th>In</th><th>Out</th><th>Hours</th><th>Name</th><th>PBAT-D2D no.</th><th>Office</th><th></th></tr></thead><tbody>${
     records.map((x) => `<tr data-id="${x.id}">${multiDay ? `<td>${fmtDay(x.day, { day: 'numeric', month: 'short' })}</td>` : ''}
       <td>${fmtTime(x.at)}</td><td>${x.checkout_at ? fmtTime(x.checkout_at) : '<span class="muted-dash">not yet</span>'}</td>
-      <td>${x.checkout_at ? (() => { const m = Math.round((x.checkout_at - x.at) / 60000); return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`; })() : '-'}</td><td><b>${esc(x.name)}</b>${x.by_admin ? ' <span class="pill" title="Signed in or out by an admin from the dashboard">by admin</span>' : ''}${x.new_device ? ' <span class="pill warn" title="This PBAT-D2D number checked in from a phone it had not used before">new phone</span>' : ''}</td>
+      <td>${x.checkout_at ? (() => { const m = Math.round((x.checkout_at - x.at) / 60000); return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`; })() : '-'}</td><td><b>${esc(x.name)}</b>${x.by_admin ? ` <span class="pill" title="Signed in or out from the dashboard">by ${esc(x.by_name || 'admin')}</span>` : ''}${x.new_device ? ' <span class="pill warn" title="This PBAT-D2D number checked in from a phone it had not used before">new phone</span>' : ''}</td>
       <td>${esc(x.member_no)}</td><td>${esc(x.venue)}</td>
       <td><button class="linkish danger" data-del>Remove</button></td></tr>`).join('')}</tbody>`;
 }
@@ -141,6 +183,31 @@ $$('[data-range]').forEach((c) => c.addEventListener('click', () => {
   $('#from').value = n <= 1 ? $('#to').value : addDays(S.today, -(n - 1));
   loadRecords();
 }));
+
+// ---- Sign someone in/out from the dashboard (People tab and the "Not in yet" list) ----
+async function signFlow(p, out) {
+  const venues = S?.venues || [];
+  if (!venues.length) return toast('Add an office first (Today tab).');
+  let venue = venues[0].id;
+  if (venues.length > 1) {
+    const dlg = $('#dlg'), form = $('#dlg-form');
+    form.onkeydown = null;
+    form.innerHTML = `<h3>Sign ${out ? 'out' : 'in'} ${esc(p.name)}</h3><p class="muted">Recorded as now, marked "by ${esc(S.me?.name || 'admin')}".</p>
+      <label class="field"><span>Office</span><select id="sign-venue">${venues.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></label>
+      <div class="dlg-actions"><button class="btn" value="ok">Sign ${out ? 'out' : 'in'}</button><button class="btn ghost" value="cancel" formnovalidate>Cancel</button></div>`;
+    fancySelect($('#sign-venue'));
+    const choice = await new Promise((resolve) => { dlg.onclose = () => resolve(dlg.returnValue === 'ok' ? $('#sign-venue').value : null); dlg.showModal(); });
+    if (!choice) return;
+    venue = Number(choice);
+  } else {
+    const ok = await ask({ title: `Sign ${out ? 'out' : 'in'} ${p.name}?`, text: `At ${esc(venues[0].name)}, recorded as now and marked "by ${esc(S.me?.name || 'admin')}".`, ok: `Sign ${out ? 'out' : 'in'}` });
+    if (!ok) return;
+  }
+  const r = await call(`/api/admin/people/${p.id}/sign`, { venue });
+  if (!r.ok) return;
+  toast(r.data.action === 'in' ? `✓ ${r.data.name} signed in` : r.data.action === 'out' ? `✓ ${r.data.name} signed out` : `${r.data.name} already signed out today`);
+  loadState(); if (!$('[data-panel=people]').hidden) loadPeople();
+}
 
 // ---- People and the office list ----
 let people = [], numPrefix = 'PBAT-D2D-2027-', numDigits = 4, peopleTz;
@@ -182,28 +249,7 @@ $('#people').addEventListener('click', async (e) => {
     const r = await ask({ title: 'Rename', text: 'People must type their name as it is here when they first register.', input: { label: 'Full name', value: p.name } });
     if (r?.value && (await call(`/api/admin/people/${id}/rename`, { name: r.value })).ok) loadPeople();
   }
-  if (b.dataset.act === 'sign') {
-    const out = Boolean(p.today_open);
-    const venues = S?.venues || [];
-    if (!venues.length) return toast('Add an office first (Today tab).');
-    let venue = venues[0].id;
-    if (venues.length > 1) {
-      const dlg = $('#dlg'), form = $('#dlg-form');
-      form.onkeydown = null;
-      form.innerHTML = `<h3>Sign ${out ? 'out' : 'in'} ${esc(p.name)}</h3><p class="muted">Recorded as now, marked "by admin".</p>
-        <label class="field"><span>Office</span><select id="sign-venue">${venues.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></label>
-        <div class="dlg-actions"><button class="btn" value="ok">Sign ${out ? 'out' : 'in'}</button><button class="btn ghost" value="cancel" formnovalidate>Cancel</button></div>`;
-      fancySelect($('#sign-venue'));
-      const choice = await new Promise((resolve) => { dlg.onclose = () => resolve(dlg.returnValue === 'ok' ? $('#sign-venue').value : null); dlg.showModal(); });
-      if (!choice) return;
-      venue = Number(choice);
-    } else {
-      const ok = await ask({ title: `Sign ${out ? 'out' : 'in'} ${p.name}?`, text: `At ${esc(venues[0].name)}, recorded as now and marked "by admin".`, ok: `Sign ${out ? 'out' : 'in'}` });
-      if (!ok) return;
-    }
-    const r = await call(`/api/admin/people/${id}/sign`, { venue });
-    if (r.ok) { toast(r.data.action === 'in' ? `✓ ${r.data.name} signed in` : r.data.action === 'out' ? `✓ ${r.data.name} signed out` : `${r.data.name} already signed out today`); loadPeople(); }
-  }
+  if (b.dataset.act === 'sign') await signFlow(p, !!p.today_open);
   if (b.dataset.act === 'list') {
     if ((await call(`/api/admin/people/${id}/listed`, { listed: true })).ok) { toast('✓ Added to the office list'); loadPeople(); }
   }
@@ -284,10 +330,58 @@ function show(tab) {
   history.replaceState(null, '', tab === 'today' ? '/admin' : `/admin#${tab}`);
 }
 $$('[role=tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
-$('#logout').addEventListener('click', async () => { await api('/api/admin/logout', {}); location.reload(); });
+$('#logout').addEventListener('click', async (e) => { e.preventDefault(); await api('/api/admin/logout', {}); location.reload(); });
+const closeMe = () => $('#me-menu').removeAttribute('open');
+document.addEventListener('click', (e) => { if (!e.target.closest('#me-menu')) closeMe(); });
+
+// ---- Manage admins (main admin only) ----
+$('#manage-admins').addEventListener('click', async (e) => {
+  e.preventDefault(); closeMe();
+  const dlg = $('#dlg'), form = $('#dlg-form');
+  const draw = async () => {
+    const r = await call('/api/admin/admins'); if (!r.ok) return;
+    form.onkeydown = null;
+    form.innerHTML = `<h3>Admins</h3><p class="muted">Each admin logs in with their own username and password. Records show who signed people in.</p>
+      <div class="admin-list">
+        <div class="admin-row"><span class="avatar small">MA</span><div><b>Main admin</b><span>username: admin · that's you</span></div></div>
+        ${r.data.admins.map((a) => `<div class="admin-row" data-id="${a.id}"><span class="avatar small">${esc(initials(a.name))}</span>
+          <div><b>${esc(a.name)}</b><span>username: ${esc(a.username)}</span></div>
+          <button type="button" class="linkish" data-pw>New password</button><button type="button" class="linkish danger" data-del>Remove</button></div>`).join('')}
+      </div>
+      <h3 style="margin-top:18px">Add an admin</h3>
+      <label class="field" data-f="name"><span>Name</span><input id="na-name" autocomplete="off"><em class="err"></em></label>
+      <div class="two">
+        <label class="field" data-f="username"><span>Username</span><input id="na-user" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="e.g. grace"><em class="err"></em></label>
+        <label class="field" data-f="password"><span>Password</span><span class="pw-wrap"><input id="na-pw" type="password" autocomplete="new-password">${EYE}</span><em class="err"></em></label>
+      </div>
+      <div class="dlg-actions"><button class="btn" type="button" id="na-save">Add admin</button><button class="btn ghost" value="cancel" formnovalidate>Close</button></div>`;
+    const err = (f, t) => { const box = $(`[data-f="${f}"]`, form); box.classList.toggle('invalid', Boolean(t)); $('.err', box).textContent = t || ''; };
+    $('#na-save').onclick = async () => {
+      ['name', 'username', 'password'].forEach((f) => err(f));
+      const res = await api('/api/admin/admins', { name: $('#na-name').value, username: $('#na-user').value, password: $('#na-pw').value });
+      if (!res.ok) { for (const [f, t] of Object.entries(res.data.fields || {})) err(f, t); if (!res.data.fields) toast(res.data.error); return; }
+      toast(`✓ Admin added. They log in with username "${$('#na-user').value.trim().toLowerCase()}"`); draw();
+    };
+    form.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => {
+      const row = b.closest('[data-id]'), name = $('b', row).textContent;
+      if (!confirm(`Remove ${name}? They are logged out straight away.`)) return;
+      if ((await call(`/api/admin/admins/${row.dataset.id}/delete`, {})).ok) { toast(`${name} removed`); draw(); }
+    }));
+    form.querySelectorAll('[data-pw]').forEach((b) => (b.onclick = async () => {
+      const row = b.closest('[data-id]'), name = $('b', row).textContent;
+      const pw = prompt(`New password for ${name} (at least 8 characters):`);
+      if (!pw) return;
+      const res = await call(`/api/admin/admins/${row.dataset.id}/password`, { password: pw });
+      if (res.ok) toast(`✓ New password set for ${name}`);
+    }));
+  };
+  dlg.onclose = null;
+  await draw(); dlg.showModal();
+});
 
 // ---- Change password ----
-$('#change-pw').addEventListener('click', () => {
+$('#change-pw').addEventListener('click', (e) => {
+  e.preventDefault(); closeMe();
   const dlg = $('#dlg'), form = $('#dlg-form');
   const pw = (id, label, auto) => `<label class="field" data-f="${id}"><span>${label}</span><span class="pw-wrap">
     <input id="${id}" type="password" autocomplete="${auto}" required>${EYE}</span><em class="err"></em></label>`;
