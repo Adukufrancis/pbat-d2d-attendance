@@ -37,9 +37,14 @@ const SCHEMA = (big, idDef) => `
     at          ${big} NOT NULL,
     ip          TEXT,
     new_device  INTEGER NOT NULL DEFAULT 0,
+    checkout_at ${big},
     UNIQUE (person_id, venue_id, day)
   );
   CREATE INDEX IF NOT EXISTS attendance_day_idx ON attendance(day, venue_id);
+  CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `;
 
 const Q = {
@@ -72,19 +77,25 @@ const Q = {
              (SELECT MAX(a.at) FROM attendance a WHERE a.person_id = p.id) AS last_seen
            FROM people p ORDER BY p.name`,
 
-  checkedIn: 'SELECT at FROM attendance WHERE person_id = $1 AND venue_id = $2 AND day = $3',
+  checkedIn: 'SELECT at, checkout_at FROM attendance WHERE person_id = $1 AND venue_id = $2 AND day = $3',
+  checkOut: `UPDATE attendance SET checkout_at = $4
+             WHERE person_id = $1 AND venue_id = $2 AND day = $3 AND checkout_at IS NULL`,
   checkIn: `INSERT INTO attendance (person_id, venue_id, day, at, ip, new_device) VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (person_id, venue_id, day) DO NOTHING`,
-  attendanceFor: `SELECT a.id, a.at, a.day, a.new_device, a.venue_id, v.name AS venue, p.id AS person_id, p.name, p.member_no
+  attendanceFor: `SELECT a.id, a.at, a.checkout_at, a.day, a.new_device, a.venue_id, v.name AS venue, p.id AS person_id, p.name, p.member_no
                   FROM attendance a JOIN people p ON p.id = a.person_id JOIN venues v ON v.id = a.venue_id
                   WHERE a.day >= $1 AND a.day <= $2 AND ($3 = 0 OR a.venue_id = $3)
                   ORDER BY a.day DESC, a.at ASC`,
-  countToday: 'SELECT COUNT(*) AS n FROM attendance WHERE venue_id = $1 AND day = $2',
+  countToday: 'SELECT COUNT(*) AS n, COUNT(checkout_at) AS out FROM attendance WHERE venue_id = $1 AND day = $2',
+  getSetting: 'SELECT value FROM settings WHERE key = $1',
+  setSetting: `INSERT INTO settings (key, value) VALUES ($1, $2)
+               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+  deleteSetting: 'DELETE FROM settings WHERE key = $1',
   deleteAttendance: 'DELETE FROM attendance WHERE id = $1',
 };
 
 const NUMERIC = new Set(['id', 'venue_id', 'person_id', 'created_at', 'at', 'networks', 'devices', 'days',
-  'last_seen', 'n', 'new_device']);
+  'last_seen', 'n', 'out', 'new_device', 'checkout_at']);
 const fix = (r) => { for (const k of Object.keys(r)) if (NUMERIC.has(k) && r[k] != null) r[k] = Number(r[k]); return r; };
 
 async function postgres(url) {
@@ -94,6 +105,7 @@ async function postgres(url) {
     ssl: local || /sslmode=disable/.test(url) ? false : { rejectUnauthorized: false } });
   await pool.query('ALTER TABLE people RENAME COLUMN phone TO member_no').catch(() => {});   // older versions
   await pool.query(SCHEMA('BIGINT', 'SERIAL PRIMARY KEY'));
+  await pool.query('ALTER TABLE attendance ADD COLUMN IF NOT EXISTS checkout_at BIGINT');   // check-out (added later)
   return { kind: 'postgres', q: async (name, params = []) => (await pool.query(Q[name], params)).rows.map(fix) };
 }
 
@@ -103,6 +115,7 @@ async function sqlite(file) {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   try { db.exec('ALTER TABLE people RENAME COLUMN phone TO member_no'); } catch {}       // older versions
   db.exec(SCHEMA('INTEGER', 'INTEGER PRIMARY KEY AUTOINCREMENT'));
+  try { db.exec('ALTER TABLE attendance ADD COLUMN checkout_at INTEGER'); } catch {}     // check-out (added later)
   const cache = {};
   return {
     kind: 'sqlite',

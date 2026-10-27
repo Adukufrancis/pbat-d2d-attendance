@@ -36,6 +36,7 @@ export const PAGES = {
       <li><b>Join the office WiFi</b> and turn off mobile data.</li>
       <li><b>Open your camera</b> and point it at today's QR code.</li>
       <li><b>Tap the link.</b> The first time, add your name and PBAT-D2D number.</li>
+      <li><b>Leaving after 5 PM?</b> Scan again to check out.</li>
     </ol>
     <p class="fine">Office admin? <a href="/admin">Log in to the dashboard</a></p>
   </div>
@@ -61,7 +62,7 @@ export const PAGES = {
     ${brand}
     <h1>Office admin login</h1>
     <p class="muted">Manage offices, show today's QR code and see who came in.</p>
-    <label class="field"><span>Password</span><input id="password" type="password" autocomplete="current-password" required></label>
+    <label class="field"><span>Password</span><span class="pw-wrap"><input id="password" type="password" autocomplete="current-password" required><button type="button" class="eye" data-eye aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="M4 4l16 16"/></svg></button></span></label>
     <button class="btn block" type="submit">Log in</button>
     <p class="msg err" id="err" hidden></p>
   </form>
@@ -76,7 +77,8 @@ export const PAGES = {
       <button role="tab" data-tab="records">Attendance</button>
       <button role="tab" data-tab="people">People</button>
     </nav>
-    <button class="btn ghost small" id="logout">Log out</button>
+    <div class="top-actions"><button class="btn ghost small" id="change-pw">Change password</button>
+    <button class="btn ghost small" id="logout">Log out</button></div>
   </div>
 </header>
 <main class="wrap dash">
@@ -130,8 +132,9 @@ export const PAGES = {
       <li><b>Join the office WiFi</b> and turn off mobile data</li>
       <li><b>Scan</b> this code with your camera</li>
       <li><b>Tap the link</b> to check in</li>
+      <li><b>From <span id="d-out-time">5:00 PM</span></b>, scan again to check out</li>
     </ol>
-    <div class="count"><span id="d-count">0</span> checked in today</div>
+    <div class="counts"><div class="count"><span id="d-count">0</span> checked in</div><div class="count out"><span id="d-out">0</span> checked out</div></div>
     <div class="display-actions">
       <button class="btn ghost small" id="d-full">Full screen</button>
       <button class="btn ghost small" onclick="print()">Print today's code</button>

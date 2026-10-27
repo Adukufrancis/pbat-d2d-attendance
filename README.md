@@ -33,3 +33,9 @@ Needs Node.js 22.13+.
 5. Open `/admin`, log in, add a venue **while on the venue WiFi**.
 
 **Check after deploying:** the dashboard shows *Your network right now*. Open it on the venue WiFi, then on mobile data: the address must change. If it doesn't, open `/api/admin/whoami` and send the output to whoever maintains the app.
+
+## Check-out
+The first scan of the day checks a person in. From `CHECKOUT_TIME` (default `17:00`, 24-hour, in `TIMEZONE`) the next scan checks them out. Earlier scans just say they're already checked in. The attendance list and CSV show time in, time out and hours.
+
+## Admin password
+It starts as `ADMIN_PASSWORD`. Use **Change password** in the dashboard to set a new one (stored as a hash in the database; other logged-in devices are logged out). Forgot it? Change `ADMIN_PASSWORD` on Render and redeploy: the new value replaces the dashboard password.

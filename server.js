@@ -21,19 +21,49 @@ if (!SECRET) {
   SECRET = 'dev-secret-change-me';
   if (IS_PROD) console.warn('WARNING: SECRET is not set. Set a long random SECRET so codes and logins are safe.');
 }
-let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-if (!ADMIN_PASSWORD) {
-  ADMIN_PASSWORD = IS_PROD ? crypto.randomBytes(9).toString('base64url') : 'admin';
-  console.warn(`NOTE: ADMIN_PASSWORD is not set. For now the admin password is: ${ADMIN_PASSWORD}`);
-}
-
-const db = await createDb();
-
-// ---- Helpers ------------------------------------------------------------------
 const hmac = (s) => crypto.createHmac('sha256', SECRET).update(s).digest('base64url');
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const safeEqual = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length
   && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+
+const db = await createDb();
+
+// ---- Admin password ------------------------------------------------------------
+// Starts as ADMIN_PASSWORD (Render setting). Changing it in the dashboard stores a scrypt hash in the
+// database. If ADMIN_PASSWORD on Render is changed later, that new value wins again (a way back in
+// if the dashboard password is forgotten).
+const ENV_PASSWORD = process.env.ADMIN_PASSWORD || (IS_PROD ? null : 'admin');
+const ENV_MARK = sha256(`env:${ENV_PASSWORD || ''}`);
+let adminPw = null;                                       // { salt, hash, env } when set in the dashboard
+try {
+  const row = await db.one('getSetting', ['admin_pw']);
+  const saved = row && JSON.parse(row.value);
+  if (saved && saved.env === ENV_MARK) adminPw = saved;
+  else if (saved) { await db.q('deleteSetting', ['admin_pw']); console.log('ADMIN_PASSWORD changed on the server: dashboard password reset.'); }
+} catch (err) { console.warn('Could not read admin password setting:', err.message); }
+let tempPassword = null;
+if (!ENV_PASSWORD && !adminPw) {
+  tempPassword = crypto.randomBytes(9).toString('base64url');
+  console.warn(`NOTE: ADMIN_PASSWORD is not set. For now the admin password is: ${tempPassword}`);
+}
+const scrypt = (pw, salt) => crypto.scryptSync(String(pw), salt, 32).toString('hex');
+function passwordOk(pw) {
+  pw = String(pw || '');
+  if (adminPw) return safeEqual(scrypt(pw, adminPw.salt), adminPw.hash);
+  const real = ENV_PASSWORD || tempPassword;
+  return Boolean(real) && safeEqual(sha256(pw), sha256(real));
+}
+const pwVersion = () => (adminPw ? adminPw.hash.slice(0, 12) : 'env');   // changing the password logs other devices out
+
+// ---- Check-out -------------------------------------------------------------------
+// From CHECKOUT_TIME (24-hour, default 17:00) a second scan checks the person out.
+const [OUT_H, OUT_M] = (/^(\d{1,2}):(\d{2})$/.exec(process.env.CHECKOUT_TIME || '17:00') || [0, 17, 0]).slice(1).map(Number);
+const CHECKOUT_LABEL = `${((OUT_H + 11) % 12) + 1}:${String(OUT_M).padStart(2, '0')} ${OUT_H < 12 ? 'AM' : 'PM'}`;
+const clockFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const minutesNow = () => { const [hh, mm] = clockFmt.format(new Date()).split(':').map(Number); return hh * 60 + mm; };
+const checkoutOpen = () => minutesNow() >= OUT_H * 60 + OUT_M;
+
+// ---- Helpers ------------------------------------------------------------------
 
 const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
 const dayOf = (t = Date.now()) => dayFmt.format(new Date(t));              // YYYY-MM-DD in TZ
@@ -95,11 +125,12 @@ app.use('/api', (req, res, next) => {
 // ---- Admin login ----------------------------------------------------------------
 const ADMIN_COOKIE = 'adm';
 const ADMIN_DAYS = 30;
-const adminToken = () => { const exp = Date.now() + ADMIN_DAYS * 864e5; return `${exp}.${hmac(`admin:${exp}`)}`; };
+const adminToken = () => { const exp = Date.now() + ADMIN_DAYS * 864e5; return `${exp}.${hmac(`admin:${exp}:${pwVersion()}`)}`; };
 const isAdmin = (req) => {
   const [exp, sig] = String(req.cookies[ADMIN_COOKIE] || '').split('.');
-  return Number(exp) > Date.now() && safeEqual(sig, hmac(`admin:${exp}`));
+  return Number(exp) > Date.now() && safeEqual(sig, hmac(`admin:${exp}:${pwVersion()}`));
 };
+const setAdminCookie = (res) => res.cookie(ADMIN_COOKIE, adminToken(), { httpOnly: true, secure: IS_PROD, sameSite: 'strict', maxAge: ADMIN_DAYS * 864e5, path: '/' });
 const needAdmin = (req, res, next) => (isAdmin(req) ? next() : res.status(401).json({ error: 'Please log in.' }));
 
 const loginTries = new Map();
@@ -107,14 +138,28 @@ app.post('/api/admin/login', (req, res) => {
   const now = Date.now();
   const tries = (loginTries.get(clientIp(req)) || []).filter((t) => now - t < 15 * 60e3);
   if (tries.length >= 10) return res.status(429).json({ error: 'Too many attempts. Wait 15 minutes and try again.' });
-  if (!safeEqual(sha256(String(req.body.password || '')), sha256(ADMIN_PASSWORD))) {
+  if (!passwordOk(req.body.password)) {
     tries.push(now); loginTries.set(clientIp(req), tries);
     return res.status(401).json({ error: 'Wrong password.' });
   }
   loginTries.delete(clientIp(req));
-  res.cookie(ADMIN_COOKIE, adminToken(), { httpOnly: true, secure: IS_PROD, sameSite: 'strict', maxAge: ADMIN_DAYS * 864e5, path: '/' });
+  setAdminCookie(res);
   res.json({ ok: true });
 });
+
+// Change the admin password from the dashboard (needs the current one).
+app.post('/api/admin/password', (req, res, next) => (isAdmin(req) ? next() : res.status(401).json({ error: 'Please log in.' })), h(async (req, res) => {
+  const { current, next: fresh } = req.body;
+  if (!passwordOk(current)) return res.status(400).json({ field: 'current', error: 'Your current password is wrong.' });
+  if (String(fresh || '').length < 8) return res.status(400).json({ field: 'next', error: 'Use at least 8 characters.' });
+  if (passwordOk(fresh)) return res.status(400).json({ field: 'next', error: "That's the same as your current password." });
+  const salt = crypto.randomBytes(16).toString('hex');
+  const saved = { salt, hash: scrypt(fresh, salt), env: ENV_MARK };
+  await db.q('setSetting', ['admin_pw', JSON.stringify(saved)]);
+  adminPw = saved; tempPassword = null;
+  setAdminCookie(res);                                    // stay logged in here; other devices are logged out
+  res.json({ ok: true });
+}));
 app.post('/api/admin/logout', (req, res) => { res.clearCookie(ADMIN_COOKIE, { path: '/' }); res.json({ ok: true }); });
 
 // ---- Admin: venues and their WiFi ------------------------------------------------
@@ -123,9 +168,10 @@ app.get('/api/admin/state', needAdmin, h(async (req, res) => {
   const venues = await db.q('venues');
   for (const v of venues) {
     v.networks = (await db.q('networks', [v.id])).map((n) => ({ id: n.id, address: n.address, here: n.address === here }));
-    v.today = (await db.one('countToday', [v.id, today])).n;
+    const c = await db.one('countToday', [v.id, today]);
+    v.today = c.n; v.out = c.out;
   }
-  res.json({ appName: APP_NAME, here: here, today, timezone: TZ, venues });
+  res.json({ appName: APP_NAME, here, today, timezone: TZ, checkoutTime: CHECKOUT_LABEL, venues });
 }));
 
 app.post('/api/admin/venues', needAdmin, h(async (req, res) => {
@@ -161,9 +207,9 @@ app.get('/api/admin/venues/:id/qr', needAdmin, h(async (req, res) => {
   const day = dayOf();
   const url = `${baseUrl(req)}/c/${v.id}/${codeFor(v.id, day)}`;
   const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#06492a', light: '#ffffff' } });
-  const count = (await db.one('countToday', [v.id, day])).n;
+  const c = await db.one('countToday', [v.id, day]);
   const networks = (await db.q('networks', [v.id])).length;
-  res.json({ name: v.name, day, url, svg, count, networks, appName: APP_NAME });
+  res.json({ name: v.name, day, url, svg, count: c.n, out: c.out, networks, appName: APP_NAME, checkoutTime: CHECKOUT_LABEL });
 }));
 
 // What the server sees of this connection (to check the WiFi detection after deploying).
@@ -188,8 +234,10 @@ app.get('/admin/attendance.csv', h(async (req, res) => {
   const { from, to, rows } = await attendanceRows(req.query);
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const time = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
-  const lines = [['Date', 'Time', 'Name', 'PBAT-D2D number', 'Office', 'Note'].map(cell).join(',')]
-    .concat(rows.map((r) => [r.day, time.format(new Date(r.at)), r.name, r.member_no, r.venue, r.new_device ? 'New phone' : ''].map(cell).join(',')));
+  const hours = (r) => (r.checkout_at ? ((r.checkout_at - r.at) / 36e5).toFixed(2) : '');
+  const lines = [['Date', 'Time in', 'Time out', 'Hours', 'Name', 'PBAT-D2D number', 'Office', 'Note'].map(cell).join(',')]
+    .concat(rows.map((r) => [r.day, time.format(new Date(r.at)), r.checkout_at ? time.format(new Date(r.checkout_at)) : '', hours(r),
+      r.name, r.member_no, r.venue, r.new_device ? 'New phone' : ''].map(cell).join(',')));
   res.set('Content-Type', 'text/csv; charset=utf-8')
     .set('Content-Disposition', `attachment; filename="attendance-${from}${to !== from ? `-to-${to}` : ''}.csv"`)
     .send(`﻿${lines.join('\r\n')}`);
@@ -259,11 +307,24 @@ app.post('/api/checkin', h(async (req, res) => {
     res.cookie(DEVICE_COOKIE, fresh, { httpOnly: true, secure: IS_PROD, sameSite: 'lax', maxAge: DEVICE_MAX_AGE, path: '/' });
   }
 
-  // 4. Record attendance once per person, venue and day.
+  // 4. First scan of the day checks in. From check-out time, the next scan checks out.
   const now = Date.now();
-  await db.q('checkIn', [person.id, venue.id, today, now, clientIp(req), newDevice]);
+  const before = await db.one('checkedIn', [person.id, venue.id, today]);
+  let action;
+  if (!before) {
+    await db.q('checkIn', [person.id, venue.id, today, now, clientIp(req), newDevice]);
+    action = 'in';
+  } else if (before.checkout_at) {
+    action = 'already-out';
+  } else if (checkoutOpen()) {
+    await db.q('checkOut', [person.id, venue.id, today, now]);
+    action = 'out';
+  } else {
+    action = 'already-in';
+  }
   const row = await db.one('checkedIn', [person.id, venue.id, today]);
-  res.json({ status: 'ok', name: person.name, number: person.member_no, venue: venue.name, at: row.at, already: row.at !== now, timezone: TZ });
+  res.json({ status: 'ok', action, name: person.name, number: person.member_no, venue: venue.name,
+    at: row.at, outAt: row.checkout_at, checkoutTime: CHECKOUT_LABEL, checkoutOpen: checkoutOpen(), timezone: TZ });
 }));
 
 // ---- Pages -------------------------------------------------------------------------
