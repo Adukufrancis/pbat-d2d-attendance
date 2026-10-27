@@ -108,6 +108,7 @@ let records = [];
 async function loadRecords() {
   const q = new URLSearchParams({ from: $('#from').value, to: $('#to').value, venue: $('#venue-filter').value });
   $('#csv').href = `/admin/attendance.csv?${q}`;
+  $('#xlsx').href = `/admin/attendance.xlsx?${q}`;
   const r = await call(`/api/admin/attendance?${q}`); if (!r.ok) return;
   records = r.data.rows;
   const people = new Set(records.map((x) => x.person_id)).size;
@@ -139,24 +140,31 @@ $$('[data-range]').forEach((c) => c.addEventListener('click', () => {
   loadRecords();
 }));
 
-// ---- People ----
-let people = [];
+// ---- People and the office list ----
+let people = [], numPrefix = 'PBAT-D2D-2027-', numDigits = 4;
 async function loadPeople() {
   const r = await call('/api/admin/people'); if (!r.ok) return;
-  people = r.data.people; renderPeople();
+  people = r.data.people; numPrefix = r.data.prefix; numDigits = r.data.digits; renderPeople();
 }
 function renderPeople() {
   const q = $('#people-search').value.trim().toLowerCase();
   const list = people.filter((p) => !q || p.name.toLowerCase().includes(q) || p.member_no.toLowerCase().includes(q.replace(/\s/g, '')));
-  $('#people-summary').textContent = `${people.length} registered`;
+  const listed = people.filter((p) => p.listed).length, linked = people.filter((p) => p.devices > 0).length;
+  $('#people-summary').textContent = `${listed} on the office list · ${linked} with a phone linked`;
+  $('#list-banner').innerHTML = listed
+    ? `<span class="dot on"></span><div><b>Office list is on.</b> Only people on the list can register, their name must match, and each number works on one phone only.</div>`
+    : `<span class="dot"></span><div><b>No office list yet.</b> Anyone with a PBAT-D2D number can register. Upload the list (Excel or CSV) or add people one by one to switch checking on.</div>`;
   const t = $('#people');
-  if (!list.length) { t.innerHTML = `<tbody><tr><td class="empty-row">${people.length ? 'No matches.' : 'Nobody has checked in yet.'}</td></tr></tbody>`; return; }
-  t.innerHTML = `<thead><tr><th>Name</th><th>PBAT-D2D no.</th><th>Days</th><th>Last check-in</th><th>Phones</th><th></th></tr></thead><tbody>${
-    list.map((p) => `<tr data-id="${p.id}"><td><b>${esc(p.name)}</b></td><td>${esc(p.member_no)}</td><td>${p.days}</td>
+  if (!list.length) { t.innerHTML = `<tbody><tr><td class="empty-row">${people.length ? 'No matches.' : 'Nobody yet. Upload the office list or add people.'}</td></tr></tbody>`; return; }
+  t.innerHTML = `<thead><tr><th>Name</th><th>PBAT-D2D no.</th><th>Office list</th><th>Phone</th><th>Days</th><th>Last check-in</th><th></th></tr></thead><tbody>${
+    list.map((p) => `<tr data-id="${p.id}"><td><b>${esc(p.name)}</b></td><td>${esc(p.member_no)}</td>
+      <td>${p.listed ? '<span class="pill ok">On list</span>' : '<span class="pill warn">Not on list</span>'}</td>
+      <td>${p.devices ? '<span class="pill ok">Linked</span>' : '<span class="muted-dash">Not yet</span>'}</td>
+      <td>${p.days}</td>
       <td>${p.last_seen ? new Date(p.last_seen).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '-'}</td>
-      <td>${p.devices}${p.devices > 1 ? ' <span class="pill warn">check</span>' : ''}</td>
       <td class="row-actions"><button class="linkish" data-act="rename">Rename</button>
-      <button class="linkish" data-act="reset" title="Unlink their phone(s), e.g. a new or lost phone">Reset phone</button>
+      ${p.listed ? '' : '<button class="linkish" data-act="list">Add to list</button>'}
+      ${p.devices ? '<button class="linkish" data-act="reset" title="Unlink their phone, e.g. a new or lost phone">Reset phone</button>' : ''}
       <button class="linkish danger" data-act="delete">Delete</button></td></tr>`).join('')}</tbody>`;
 }
 $('#people-search').addEventListener('input', renderPeople);
@@ -164,17 +172,76 @@ $('#people').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const id = b.closest('tr').dataset.id, p = people.find((x) => String(x.id) === id);
   if (b.dataset.act === 'rename') {
-    const r = await ask({ title: 'Rename', input: { label: 'Full name', value: p.name } });
+    const r = await ask({ title: 'Rename', text: 'People must type their name as it is here when they first register.', input: { label: 'Full name', value: p.name } });
     if (r?.value && (await call(`/api/admin/people/${id}/rename`, { name: r.value })).ok) loadPeople();
   }
+  if (b.dataset.act === 'list') {
+    if ((await call(`/api/admin/people/${id}/listed`, { listed: true })).ok) { toast('✓ Added to the office list'); loadPeople(); }
+  }
   if (b.dataset.act === 'reset') {
-    const ok = await ask({ title: `Reset ${p.name}'s phone?`, text: 'Their phone is unlinked. Next time they scan, they enter their name and PBAT-D2D number again on whichever phone they use.', ok: 'Reset' });
+    const ok = await ask({ title: `Reset ${p.name}'s phone?`, text: 'Their phone is unlinked. Next time they scan, they register again (name and number) on the phone they use now. Only do this if they really changed or lost their phone.', ok: 'Reset' });
     if (ok && (await call(`/api/admin/people/${id}/reset-devices`, {})).ok) { toast('✓ Phone reset'); loadPeople(); }
   }
   if (b.dataset.act === 'delete') {
-    const ok = await ask({ title: `Delete ${p.name}?`, text: 'Also deletes all their attendance records. This cannot be undone.', ok: 'Delete', danger: true });
+    const ok = await ask({ title: `Delete ${p.name}?`, text: 'Removes them from the list and deletes all their attendance records. This cannot be undone.', ok: 'Delete', danger: true });
     if (ok && (await call(`/api/admin/people/${id}/delete`, {})).ok) { toast('Deleted'); loadPeople(); }
   }
+});
+
+// Add one person by hand
+$('#add-person').addEventListener('click', () => {
+  const dlg = $('#dlg'), form = $('#dlg-form');
+  form.innerHTML = `<h3>Add a person</h3><p class="muted">They can register on their phone the next time they scan the QR code.</p>
+    <label class="field" data-f="name"><span>Full name (as on their ID)</span><input id="ap-name" autocomplete="off" required><em class="err"></em></label>
+    <label class="field" data-f="number"><span>PBAT-D2D number <small class="hint">last ${numDigits} digits</small></span>
+      <span class="prefixed"><b>${esc(numPrefix)}</b><input id="ap-number" inputmode="numeric" maxlength="${numDigits}" placeholder="${'0'.repeat(numDigits)}" autocomplete="off" required></span><em class="err"></em></label>
+    <div class="dlg-actions"><button class="btn" id="ap-save" type="button">Add person</button>
+    <button class="btn ghost" value="cancel" formnovalidate>Cancel</button></div>`;
+  dlg.onclose = null; dlg.showModal(); $('#ap-name').focus();
+  $('#ap-number').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, numDigits); });
+  const err = (f, text) => { const box = $(`[data-f="${f}"]`, form); box.classList.toggle('invalid', Boolean(text)); $('.err', box).textContent = text || ''; };
+  const save = async () => {
+    err('name'); err('number');
+    const btn = $('#ap-save'); btn.disabled = true;
+    const r = await api('/api/admin/people/add', { name: $('#ap-name').value, number: $('#ap-number').value });
+    btn.disabled = false;
+    if (!r.ok) { for (const [f, t] of Object.entries(r.data.fields || {})) err(f, t); if (!r.data.fields) toast(r.data.error || 'Something went wrong.'); return; }
+    dlg.close(); toast(`✓ Added ${r.data.number}`); loadPeople();
+  };
+  $('#ap-save').addEventListener('click', save);
+  form.onkeydown = (e) => { if (e.key === 'Enter' && e.target.matches('input')) { e.preventDefault(); save(); } };
+});
+
+// Upload the office list: preview first, then save
+$('#upload-list').addEventListener('click', () => $('#list-file').click());
+$('#list-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  if (file.size > 5e6) return toast('That file is too big (5 MB max).');
+  const data = await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1] || ''); fr.readAsDataURL(file); });
+  const send = (dryRun) => api('/api/admin/people/import', { filename: file.name, data, dryRun });
+  const r = await send(true);
+  if (!r.ok) return toast(r.data.error || 'Could not read that file.');
+  const d = r.data, dlg = $('#dlg'), form = $('#dlg-form');
+  form.onkeydown = null;
+  form.innerHTML = `<h3>Upload ${esc(file.name)}</h3>
+    <p class="muted">Names from <b>${esc(d.columns.name)}</b>, numbers from <b>${esc(d.columns.number)}</b>.</p>
+    <div class="import-stats">
+      <div><b>${d.added}</b><span>new</span></div><div><b>${d.updated}</b><span>updated</span></div>
+      <div><b>${d.unchanged}</b><span>already on list</span></div><div class="${d.skipped.length ? 'bad' : ''}"><b>${d.skipped.length}</b><span>skipped</span></div>
+    </div>
+    ${d.sample.length ? `<p class="fine">For example: ${d.sample.slice(0, 3).map((s) => `${esc(s.name)} · ${esc(s.number)}`).join('; ')}</p>` : ''}
+    ${d.skipped.length ? `<details class="skipped"><summary>See skipped rows</summary><ul>${d.skipped.slice(0, 50).map((s) =>
+      `<li>Row ${s.line}: ${esc(s.name || '(no name)')} · ${esc(s.number || '(no number)')} <em>${esc(s.reason)}</em></li>`).join('')}</ul></details>` : ''}
+    <div class="dlg-actions"><button class="btn" id="imp-save" type="button" ${d.total ? '' : 'disabled'}>Save ${d.added + d.updated} to the list</button>
+    <button class="btn ghost" value="cancel" formnovalidate>Cancel</button></div>`;
+  dlg.onclose = null; dlg.showModal();
+  $('#imp-save').addEventListener('click', async () => {
+    $('#imp-save').disabled = true;
+    const s = await send(false);
+    if (!s.ok) { $('#imp-save').disabled = false; return toast(s.data.error || 'Something went wrong.'); }
+    dlg.close(); toast(`✓ Office list saved: ${s.data.added} new, ${s.data.updated} updated`); loadPeople();
+  });
 });
 
 // ---- Tabs ----

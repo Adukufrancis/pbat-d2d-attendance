@@ -95,7 +95,7 @@ export const PAGES = {
   <section data-panel="records" hidden>
     <div class="panel-head">
       <div><h2>Attendance</h2><p class="muted" id="rec-summary"></p></div>
-      <a class="btn ghost" id="csv" href="#">Download CSV</a>
+      <div class="people-actions"><a class="btn" id="xlsx" href="#">Download Excel</a><a class="btn ghost" id="csv" href="#">CSV</a></div>
     </div>
     <div class="filters">
       <label class="field small"><span>From</span><input type="date" id="from"></label>
@@ -114,8 +114,14 @@ export const PAGES = {
   <section data-panel="people" hidden>
     <div class="panel-head">
       <div><h2>People</h2><p class="muted" id="people-summary"></p></div>
-      <label class="field small search"><span class="sr">Search</span><input id="people-search" placeholder="Search name or number"></label>
+      <div class="people-actions">
+        <button class="btn ghost" id="upload-list">Upload office list</button>
+        <button class="btn" id="add-person">+ Add person</button>
+        <input type="file" id="list-file" accept=".xlsx,.csv" hidden>
+      </div>
     </div>
+    <div class="list-banner" id="list-banner"></div>
+    <label class="field small search"><span class="sr">Search</span><input id="people-search" placeholder="Search name or number"></label>
     <div class="table-wrap"><table class="table" id="people"></table></div>
   </section>
 </main>

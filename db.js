@@ -62,16 +62,20 @@ const Q = {
                ON CONFLICT (venue_id, address) DO NOTHING`,
   deleteNetwork: 'DELETE FROM venue_networks WHERE id = $1 AND venue_id = $2',
 
-  personByNumber: 'SELECT id, name, member_no, created_at FROM people WHERE member_no = $1',
-  personByDevice: `SELECT p.id, p.name, p.member_no, p.created_at FROM devices d
+  personByNumber: 'SELECT id, name, member_no, listed, created_at FROM people WHERE member_no = $1',
+  personByDevice: `SELECT p.id, p.name, p.member_no, p.listed, p.created_at FROM devices d
                    JOIN people p ON p.id = d.person_id WHERE d.token_hash = $1`,
   addPerson: 'INSERT INTO people (name, member_no, created_at) VALUES ($1, $2, $3) RETURNING id',
+  addListed: 'INSERT INTO people (name, member_no, created_at, listed) VALUES ($1, $2, $3, 1) RETURNING id',
+  updateListed: 'UPDATE people SET name = $2, listed = 1 WHERE id = $1',
+  setListed: 'UPDATE people SET listed = $2 WHERE id = $1',
+  listedCount: 'SELECT COUNT(*) AS n FROM people WHERE listed = 1',
   renamePerson: 'UPDATE people SET name = $2 WHERE id = $1',
   deletePerson: 'DELETE FROM people WHERE id = $1',
   addDevice: 'INSERT INTO devices (token_hash, person_id, created_at, user_agent) VALUES ($1, $2, $3, $4)',
   deviceCount: 'SELECT COUNT(*) AS n FROM devices WHERE person_id = $1',
   clearDevices: 'DELETE FROM devices WHERE person_id = $1',
-  people: `SELECT p.id, p.name, p.member_no, p.created_at,
+  people: `SELECT p.id, p.name, p.member_no, p.listed, p.created_at,
              (SELECT COUNT(*) FROM devices d WHERE d.person_id = p.id) AS devices,
              (SELECT COUNT(*) FROM attendance a WHERE a.person_id = p.id) AS days,
              (SELECT MAX(a.at) FROM attendance a WHERE a.person_id = p.id) AS last_seen
@@ -95,7 +99,7 @@ const Q = {
 };
 
 const NUMERIC = new Set(['id', 'venue_id', 'person_id', 'created_at', 'at', 'networks', 'devices', 'days',
-  'last_seen', 'n', 'out', 'new_device', 'checkout_at']);
+  'last_seen', 'n', 'out', 'new_device', 'checkout_at', 'listed']);
 const fix = (r) => { for (const k of Object.keys(r)) if (NUMERIC.has(k) && r[k] != null) r[k] = Number(r[k]); return r; };
 
 async function postgres(url) {
@@ -106,6 +110,7 @@ async function postgres(url) {
   await pool.query('ALTER TABLE people RENAME COLUMN phone TO member_no').catch(() => {});   // older versions
   await pool.query(SCHEMA('BIGINT', 'SERIAL PRIMARY KEY'));
   await pool.query('ALTER TABLE attendance ADD COLUMN IF NOT EXISTS checkout_at BIGINT');   // check-out (added later)
+  await pool.query('ALTER TABLE people ADD COLUMN IF NOT EXISTS listed INTEGER NOT NULL DEFAULT 0');   // office list
   return { kind: 'postgres', q: async (name, params = []) => (await pool.query(Q[name], params)).rows.map(fix) };
 }
 
@@ -116,6 +121,7 @@ async function sqlite(file) {
   try { db.exec('ALTER TABLE people RENAME COLUMN phone TO member_no'); } catch {}       // older versions
   db.exec(SCHEMA('INTEGER', 'INTEGER PRIMARY KEY AUTOINCREMENT'));
   try { db.exec('ALTER TABLE attendance ADD COLUMN checkout_at INTEGER'); } catch {}     // check-out (added later)
+  try { db.exec('ALTER TABLE people ADD COLUMN listed INTEGER NOT NULL DEFAULT 0'); } catch {}   // office list
   const cache = {};
   return {
     kind: 'sqlite',

@@ -39,3 +39,12 @@ The first scan of the day checks a person in. From `CHECKOUT_TIME` (default `17:
 
 ## Admin password
 It starts as `ADMIN_PASSWORD`. Use **Change password** in the dashboard to set a new one (stored as a hash in the database; other logged-in devices are logged out). Forgot it? Change `ADMIN_PASSWORD` on Render and redeploy: the new value replaces the dashboard password.
+
+## Office list (who may sign in)
+In **People**, click **Upload office list** and choose an Excel (.xlsx) or CSV file with a name column (or Surname + First name columns) and a PBAT number column. You see a preview (new / updated / skipped rows) before saving. **+ Add person** adds one person by hand.
+Once the list has anyone on it:
+- only numbers on the list can register, and the name typed must match the list (any order, any case; an extra middle name is fine),
+- each number can be linked to **one phone only**. To move someone to a new phone, use **Reset phone**.
+
+## Downloads
+**Attendance → Download Excel** gives a formatted .xlsx with an Attendance sheet (date, name, number, office, time in/out, hours) and a Summary sheet (days present and total hours per person). CSV is still available.

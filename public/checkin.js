@@ -84,7 +84,9 @@ async function run(extra = {}, form = null) {
   } else if (data.reason === 'offline') {
     state('network', 'No connection', esc(data.error), retry);
   } else {
-    state('error', "Can't check in", esc(data.error || 'Something went wrong.'), data.reason === 'invalid' ? '' : retry);
+    const titles = { taken: 'Number already in use', notlisted: 'Not on the office list' };
+    state('error', titles[data.reason] || "Can't check in", esc(data.error || 'Something went wrong.'),
+      ['invalid', 'taken', 'notlisted'].includes(data.reason) ? '' : retry);
   }
   $('#retry')?.addEventListener('click', () => {
     view.innerHTML = '<div class="state"><div class="ring-spin"></div><h1>Checking…</h1></div>';
