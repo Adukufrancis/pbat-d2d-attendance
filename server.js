@@ -149,7 +149,11 @@ app.use(cookieParser());
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: IS_PROD ? '1h' : 0 }));
+// Scripts and styles: browsers must check for a newer version every time (cheap 304 if unchanged),
+// so updates show up immediately. Images and icons can be kept for a day.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, file) => res.set('Cache-Control', /\.(js|css|html)$/.test(file) ? 'no-cache' : 'public, max-age=86400'),
+}));
 
 // State-changing API calls must be JSON (blocks cross-site form posts).
 app.use('/api', (req, res, next) => {
