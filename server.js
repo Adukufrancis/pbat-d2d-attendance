@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import QRCode from 'qrcode';
 import ExcelJS from 'exceljs';
+import PDFDocument from 'pdfkit';
 
 /** All rows of the first sheet of an .xlsx file, as plain values. */
 async function readXlsx(buf) {
@@ -346,6 +347,67 @@ app.get('/admin/attendance.xlsx', h(async (req, res) => {
     .set('Content-Disposition', `attachment; filename="attendance-${from}${to !== from ? `-to-${to}` : ''}.xlsx"`);
   await wb.xlsx.write(res);
   res.end();
+}));
+
+// Attendance as a printable PDF report (same filters as the Excel file).
+app.get('/admin/attendance.pdf', h(async (req, res) => {
+  if (!isAdmin(req)) return res.redirect('/admin');
+  const { from, to, rows } = await attendanceRows(req.query);
+  const venueId = Number(req.query.venue) || 0;
+  const office = venueId ? (await db.one('venue', [venueId]))?.name : 'All offices';
+  const time = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+  const longDay = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const hrs = (r) => (r.checkout_at ? (() => { const m = Math.round((r.checkout_at - r.at) / 60000); return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`; })() : '-');
+
+  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margins: { top: 36, left: 36, right: 36, bottom: 10 }, bufferPages: true, info: { Title: `Attendance ${from}${to !== from ? ` to ${to}` : ''}`, Author: APP_NAME } });
+  res.set('Content-Type', 'application/pdf')
+    .set('Content-Disposition', `attachment; filename="attendance-${from}${to !== from ? `-to-${to}` : ''}.pdf"`);
+  doc.pipe(res);
+  const GREEN = '#0a6b3d', DEEP = '#06492a', GOLD = '#e2a72e', MUTED = '#5d6a63', LINE = '#dfe3dc';
+  const W = doc.page.width - 72, X = 36;
+  const cols = [ // [heading, width share, value]
+    ['Date', 0.12, (r) => longDay(r.day)], ['Name', 0.21, (r) => r.name], ['PBAT-D2D no.', 0.16, (r) => r.member_no],
+    ['Office', 0.18, (r) => r.venue], ['In', 0.07, (r) => time.format(new Date(r.at))],
+    ['Out', 0.07, (r) => (r.checkout_at ? time.format(new Date(r.checkout_at)) : '-')], ['Hours', 0.08, hrs],
+    ['Note', 0.11, (r) => [r.by_admin ? 'By admin' : '', r.new_device ? 'New phone' : ''].filter(Boolean).join(', ')],
+  ].map(([h, w, f]) => ({ h, w: w * W, f }));
+
+  const header = () => {
+    try { doc.image(path.join(__dirname, 'public', 'images', 'logo-transparent.png'), X, 28, { height: 40 }); } catch {}
+    doc.fillColor(DEEP).font('Helvetica-Bold').fontSize(16).text('Office Attendance', X + 80, 32);
+    doc.fillColor(MUTED).font('Helvetica').fontSize(10)
+      .text(`${office}  ·  ${longDay(from)}${to !== from ? ` to ${longDay(to)}` : ''}  ·  ${rows.length} check-in${rows.length === 1 ? '' : 's'}, ${new Set(rows.map((r) => r.person_id)).size} people`, X + 80, 52);
+    doc.moveTo(X, 76).lineTo(X + W, 76).lineWidth(2).strokeColor(GREEN).stroke();
+    let x = X; const y = 86;
+    doc.rect(X, y, W, 20).fill(GREEN);
+    doc.fillColor('#fff').font('Helvetica-Bold').fontSize(9);
+    for (const c of cols) { doc.text(c.h.toUpperCase(), x + 6, y + 6, { width: c.w - 12, lineBreak: false }); x += c.w; }
+    return y + 20;
+  };
+  let y = header();
+  if (!rows.length) doc.fillColor(MUTED).font('Helvetica').fontSize(11).text('No check-ins for these dates.', X, y + 20);
+  rows.forEach((r, i) => {
+    if (y > doc.page.height - 60) { doc.addPage(); y = header(); }
+    if (i % 2) doc.rect(X, y, W, 18).fill('#f4f6f2');
+    let x = X;
+    for (const c of cols) {
+      doc.fillColor(c.h === 'Note' ? '#a8701a' : '#14201a').font(c.h === 'Name' ? 'Helvetica-Bold' : 'Helvetica').fontSize(9)
+        .text(String(c.f(r) ?? ''), x + 6, y + 5, { width: c.w - 12, height: 10, lineBreak: false, ellipsis: true });
+      x += c.w;
+    }
+    doc.moveTo(X, y + 18).lineTo(X + W, y + 18).lineWidth(0.5).strokeColor(LINE).stroke();
+    y += 18;
+  });
+  // footer on every page
+  const range = doc.bufferedPageRange();
+  for (let p = range.start; p < range.start + range.count; p++) {
+    doc.switchToPage(p);
+    doc.fillColor(MUTED).font('Helvetica').fontSize(8)
+      .text(`${APP_NAME} · generated ${new Date().toLocaleString('en-GB', { timeZone: TZ })} · page ${p + 1} of ${range.count}`,
+        X, doc.page.height - 30, { width: W, align: 'center', lineBreak: false });
+    doc.rect(X, doc.page.height - 38, 40, 2).fill(GOLD);
+  }
+  doc.end();
 }));
 
 app.get('/api/admin/people', needAdmin, h(async (req, res) => res.json({

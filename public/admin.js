@@ -107,7 +107,7 @@ $('#venues').addEventListener('click', async (e) => {
 let records = [];
 async function loadRecords() {
   const q = new URLSearchParams({ from: $('#from').value, to: $('#to').value, venue: $('#venue-filter').value });
-  $('#csv').href = `/admin/attendance.csv?${q}`;
+  $('#pdf').href = `/admin/attendance.pdf?${q}`;
   $('#xlsx').href = `/admin/attendance.xlsx?${q}`;
   const r = await call(`/api/admin/attendance?${q}`); if (!r.ok) return;
   records = r.data.rows;

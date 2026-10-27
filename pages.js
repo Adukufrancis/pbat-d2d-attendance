@@ -95,7 +95,7 @@ export const PAGES = {
   <section data-panel="records" hidden>
     <div class="panel-head">
       <div><h2>Attendance</h2><p class="muted" id="rec-summary"></p></div>
-      <div class="people-actions"><a class="btn" id="xlsx" href="#">Download Excel</a><a class="btn ghost" id="csv" href="#">CSV</a></div>
+      <div class="people-actions"><a class="btn" id="xlsx" href="#">Download Excel</a><a class="btn ghost" id="pdf" href="#">Download PDF</a></div>
     </div>
     <div class="filters">
       <label class="field small"><span>From</span><input type="date" id="from"></label>
