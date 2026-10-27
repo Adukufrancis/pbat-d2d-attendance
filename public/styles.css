@@ -240,3 +240,6 @@ body.dark { background: var(--green-deep); color: #fff; }
 /* File box kept in the page (not display:none) so every browser lets the label open it */
 .file-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
 label.btn { cursor: pointer; }
+
+.pill { background: #eef0ec; color: var(--ink); }
+.row-actions .btn.small { margin-right: 6px; padding: 6px 12px; }

@@ -293,7 +293,7 @@ app.get('/admin/attendance.csv', h(async (req, res) => {
   const hours = (r) => (r.checkout_at ? ((r.checkout_at - r.at) / 36e5).toFixed(2) : '');
   const lines = [['Date', 'Time in', 'Time out', 'Hours', 'Name', 'PBAT-D2D number', 'Office', 'Note'].map(cell).join(',')]
     .concat(rows.map((r) => [r.day, time.format(new Date(r.at)), r.checkout_at ? time.format(new Date(r.checkout_at)) : '', hours(r),
-      r.name, r.member_no, r.venue, r.new_device ? 'New phone' : ''].map(cell).join(',')));
+      r.name, r.member_no, r.venue, [r.by_admin ? 'By admin' : '', r.new_device ? 'New phone' : ''].filter(Boolean).join(', ')].map(cell).join(',')));
   res.set('Content-Type', 'text/csv; charset=utf-8')
     .set('Content-Disposition', `attachment; filename="attendance-${from}${to !== from ? `-to-${to}` : ''}.csv"`)
     .send(`﻿${lines.join('\r\n')}`);
@@ -325,7 +325,7 @@ app.get('/admin/attendance.xlsx', h(async (req, res) => {
       day: r.day, name: r.name, no: r.member_no, office: r.venue,
       in: time.format(new Date(r.at)), out: r.checkout_at ? time.format(new Date(r.checkout_at)) : '',
       hours: r.checkout_at ? Math.round(((r.checkout_at - r.at) / 36e5) * 100) / 100 : null,
-      note: r.checkout_at ? '' : 'No check-out',
+      note: [r.by_admin ? 'By admin' : '', r.checkout_at ? '' : 'No check-out'].filter(Boolean).join(', '),
     });
     row.getCell('hours').numFmt = '0.00';
   }
@@ -349,8 +349,24 @@ app.get('/admin/attendance.xlsx', h(async (req, res) => {
 }));
 
 app.get('/api/admin/people', needAdmin, h(async (req, res) => res.json({
-  people: await db.q('people'), prefix: NUMBER_PREFIX, digits: NUMBER_DIGITS,
+  people: await db.q('people', [dayOf()]), prefix: NUMBER_PREFIX, digits: NUMBER_DIGITS, timezone: TZ,
 })));
+
+// Sign someone in (or out) from the dashboard, e.g. no smartphone. Uses today's date; first time = in, next = out.
+app.post('/api/admin/people/:id/sign', needAdmin, h(async (req, res) => {
+  const person = await db.one('personById', [Number(req.params.id)]);
+  if (!person) return res.status(404).json({ error: 'Person not found.' });
+  const venues = await db.q('venues');
+  const venue = venues.find((v) => v.id === Number(req.body.venue)) || (venues.length === 1 ? venues[0] : null);
+  if (!venue) return res.status(400).json({ error: venues.length ? 'Choose the office.' : 'Add an office first (Today tab).' });
+  const today = dayOf(), now = Date.now();
+  const row = await db.one('checkedIn', [person.id, venue.id, today]);
+  let action;
+  if (!row) { await db.q('adminCheckIn', [person.id, venue.id, today, now]); action = 'in'; }
+  else if (!row.checkout_at) { await db.q('adminCheckOut', [person.id, venue.id, today, now]); action = 'out'; }
+  else action = 'already-out';
+  res.json({ ok: true, action, name: person.name, venue: venue.name });
+}));
 
 // Add one person to the office list by hand.
 app.post('/api/admin/people/add', needAdmin, h(async (req, res) => {

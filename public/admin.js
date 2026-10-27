@@ -119,7 +119,7 @@ async function loadRecords() {
   t.innerHTML = `<thead><tr>${multiDay ? '<th>Date</th>' : ''}<th>In</th><th>Out</th><th>Hours</th><th>Name</th><th>PBAT-D2D no.</th><th>Office</th><th></th></tr></thead><tbody>${
     records.map((x) => `<tr data-id="${x.id}">${multiDay ? `<td>${fmtDay(x.day, { day: 'numeric', month: 'short' })}</td>` : ''}
       <td>${fmtTime(x.at)}</td><td>${x.checkout_at ? fmtTime(x.checkout_at) : '<span class="muted-dash">not yet</span>'}</td>
-      <td>${x.checkout_at ? (() => { const m = Math.round((x.checkout_at - x.at) / 60000); return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`; })() : '-'}</td><td><b>${esc(x.name)}</b>${x.new_device ? ' <span class="pill warn" title="This PBAT-D2D number checked in from a phone it had not used before">new phone</span>' : ''}</td>
+      <td>${x.checkout_at ? (() => { const m = Math.round((x.checkout_at - x.at) / 60000); return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`; })() : '-'}</td><td><b>${esc(x.name)}</b>${x.by_admin ? ' <span class="pill" title="Signed in or out by an admin from the dashboard">by admin</span>' : ''}${x.new_device ? ' <span class="pill warn" title="This PBAT-D2D number checked in from a phone it had not used before">new phone</span>' : ''}</td>
       <td>${esc(x.member_no)}</td><td>${esc(x.venue)}</td>
       <td><button class="linkish danger" data-del>Remove</button></td></tr>`).join('')}</tbody>`;
 }
@@ -141,10 +141,10 @@ $$('[data-range]').forEach((c) => c.addEventListener('click', () => {
 }));
 
 // ---- People and the office list ----
-let people = [], numPrefix = 'PBAT-D2D-2027-', numDigits = 4;
+let people = [], numPrefix = 'PBAT-D2D-2027-', numDigits = 4, peopleTz;
 async function loadPeople() {
   const r = await call('/api/admin/people'); if (!r.ok) return;
-  people = r.data.people; numPrefix = r.data.prefix; numDigits = r.data.digits; renderPeople();
+  people = r.data.people; numPrefix = r.data.prefix; numDigits = r.data.digits; peopleTz = r.data.timezone; renderPeople();
 }
 function renderPeople() {
   const q = $('#people-search').value.trim().toLowerCase();
@@ -156,13 +156,18 @@ function renderPeople() {
     : `<span class="dot"></span><div><b>No office list yet.</b> Anyone with a PBAT-D2D number can register. Upload the list (Excel or CSV) or add people one by one to switch checking on.</div>`;
   const t = $('#people');
   if (!list.length) { t.innerHTML = `<tbody><tr><td class="empty-row">${people.length ? 'No matches.' : 'Nobody yet. Upload the office list or add people.'}</td></tr></tbody>`; return; }
-  t.innerHTML = `<thead><tr><th>Name</th><th>PBAT-D2D no.</th><th>Office list</th><th>Phone</th><th>Days</th><th>Last check-in</th><th></th></tr></thead><tbody>${
+  const hm = (ts) => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: peopleTz });
+  const todayCell = (p) => (p.today_open ? `<span class="pill ok">In ${hm(p.today_in)}</span>`
+    : p.today_out ? `<span class="pill">Out ${hm(p.today_out)}</span>` : '<span class="muted-dash">-</span>');
+  const signBtn = (p) => (p.today_open ? '<button class="btn small" data-act="sign">Sign out</button>'
+    : p.today_out ? '' : '<button class="btn small" data-act="sign">Sign in</button>');
+  t.innerHTML = `<thead><tr><th>Name</th><th>PBAT-D2D no.</th><th>Today</th><th>Office list</th><th>Phone</th><th>Days</th><th></th></tr></thead><tbody>${
     list.map((p) => `<tr data-id="${p.id}"><td><b>${esc(p.name)}</b></td><td>${esc(p.member_no)}</td>
+      <td>${todayCell(p)}</td>
       <td>${p.listed ? '<span class="pill ok">On list</span>' : '<span class="pill warn">Not on list</span>'}</td>
       <td>${p.devices ? '<span class="pill ok">Linked</span>' : '<span class="muted-dash">Not yet</span>'}</td>
       <td>${p.days}</td>
-      <td>${p.last_seen ? new Date(p.last_seen).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '-'}</td>
-      <td class="row-actions"><button class="linkish" data-act="rename">Rename</button>
+      <td class="row-actions">${signBtn(p)}<button class="linkish" data-act="rename">Rename</button>
       ${p.listed ? '' : '<button class="linkish" data-act="list">Add to list</button>'}
       ${p.devices ? '<button class="linkish" data-act="reset" title="Unlink their phone, e.g. a new or lost phone">Reset phone</button>' : ''}
       <button class="linkish danger" data-act="delete">Delete</button></td></tr>`).join('')}</tbody>`;
@@ -174,6 +179,27 @@ $('#people').addEventListener('click', async (e) => {
   if (b.dataset.act === 'rename') {
     const r = await ask({ title: 'Rename', text: 'People must type their name as it is here when they first register.', input: { label: 'Full name', value: p.name } });
     if (r?.value && (await call(`/api/admin/people/${id}/rename`, { name: r.value })).ok) loadPeople();
+  }
+  if (b.dataset.act === 'sign') {
+    const out = Boolean(p.today_open);
+    const venues = S?.venues || [];
+    if (!venues.length) return toast('Add an office first (Today tab).');
+    let venue = venues[0].id;
+    if (venues.length > 1) {
+      const dlg = $('#dlg'), form = $('#dlg-form');
+      form.onkeydown = null;
+      form.innerHTML = `<h3>Sign ${out ? 'out' : 'in'} ${esc(p.name)}</h3><p class="muted">Recorded as now, marked "by admin".</p>
+        <label class="field"><span>Office</span><select id="sign-venue">${venues.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></label>
+        <div class="dlg-actions"><button class="btn" value="ok">Sign ${out ? 'out' : 'in'}</button><button class="btn ghost" value="cancel" formnovalidate>Cancel</button></div>`;
+      const choice = await new Promise((resolve) => { dlg.onclose = () => resolve(dlg.returnValue === 'ok' ? $('#sign-venue').value : null); dlg.showModal(); });
+      if (!choice) return;
+      venue = Number(choice);
+    } else {
+      const ok = await ask({ title: `Sign ${out ? 'out' : 'in'} ${p.name}?`, text: `At ${esc(venues[0].name)}, recorded as now and marked "by admin".`, ok: `Sign ${out ? 'out' : 'in'}` });
+      if (!ok) return;
+    }
+    const r = await call(`/api/admin/people/${id}/sign`, { venue });
+    if (r.ok) { toast(r.data.action === 'in' ? `✓ ${r.data.name} signed in` : r.data.action === 'out' ? `✓ ${r.data.name} signed out` : `${r.data.name} already signed out today`); loadPeople(); }
   }
   if (b.dataset.act === 'list') {
     if ((await call(`/api/admin/people/${id}/listed`, { listed: true })).ok) { toast('✓ Added to the office list'); loadPeople(); }

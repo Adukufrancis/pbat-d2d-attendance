@@ -48,3 +48,6 @@ Once the list has anyone on it:
 
 ## Downloads
 **Attendance → Download Excel** gives a formatted .xlsx with an Attendance sheet (date, name, number, office, time in/out, hours) and a Summary sheet (days present and total hours per person). CSV is still available.
+
+## Signing someone in from the dashboard
+For people without a smartphone: **People → Sign in** (and later **Sign out**) next to their name. It records the current time at the chosen office and is marked **by admin** in the attendance list, Excel and CSV.
