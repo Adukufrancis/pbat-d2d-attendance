@@ -103,6 +103,7 @@ function renderVenues() {
       </div>
       <div class="venue-actions">
         <a class="btn" href="/admin/display/${v.id}">Show QR code</a>
+        <button class="btn ghost" data-act="screen">Screen link</button>
         ${here ? '<span class="pill ok">✓ You\'re on this office\'s WiFi</span>' : '<button class="btn ghost" data-act="usenet">Use this network</button>'}
       </div>
       <details class="nets"><summary>WiFi networks & settings</summary>
@@ -132,6 +133,7 @@ $('#venues').addEventListener('click', async (e) => {
       text: `Only do this <b>at ${esc(v.name)}</b>, connected to its WiFi. Phones on <code>${esc(S.here)}</code> will be able to check in there.` });
     if (ok && (await call(`/api/admin/venues/${id}/networks`, {})).ok) { toast('✓ WiFi saved'); loadState(); }
   }
+  if (b.dataset.act === 'screen') return screenLink(id, v);
   if (b.dataset.act === 'delnet') {
     const ok = await ask({ title: 'Remove this network?', text: 'Phones on it will no longer be able to check in here.', ok: 'Remove', danger: true });
     if (ok && (await call(`/api/admin/venues/${id}/networks/${b.dataset.nid}/delete`, {})).ok) loadState();
@@ -145,6 +147,32 @@ $('#venues').addEventListener('click', async (e) => {
     if (ok && (await call(`/api/admin/venues/${id}/delete`, {})).ok) { toast('Office deleted'); loadState(); }
   }
 });
+
+// Screen link: opens this office's QR screen without logging in (for a tablet/TV at the entrance).
+async function screenLink(id, v) {
+  const r = await call(`/api/admin/venues/${id}/screen-link`); if (!r.ok) return;
+  const dlg = $('#dlg'), form = $('#dlg-form');
+  const draw = (url) => {
+    form.innerHTML = `<h3>Screen link for ${esc(v.name)}</h3>
+      <p class="muted">Open this link on the tablet or TV at the entrance. It shows today's QR code <b>without logging in</b>,
+        updates itself every day, and only works on this office's WiFi.</p>
+      <label class="field"><span>Screen link</span><input id="dlg-in" value="${esc(url)}" readonly></label>
+      <p class="fine">Treat it like a key: only put it on the office screen. If it gets shared, tap <b>Make a new link</b>; the old one stops working.</p>
+      <div class="dlg-actions">
+        <button class="btn" type="button" id="sl-copy">Copy link</button>
+        <a class="btn ghost" href="${esc(url)}" target="_blank" rel="noopener">Open</a>
+        <button class="btn ghost danger" type="button" id="sl-new">Make a new link</button>
+        <button class="btn ghost" value="cancel" formnovalidate>Close</button>
+      </div>`;
+    $('#sl-copy').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('✓ Link copied'); } catch { $('#dlg-in').select(); } };
+    $('#sl-new').onclick = async () => {
+      if (!confirm('Make a new link? The old link stops working straight away, so update the office screen.')) return;
+      const n = await call(`/api/admin/venues/${id}/screen-link/reset`, {}); if (n.ok) { draw(n.data.url); toast('✓ New link made'); }
+    };
+  };
+  draw(r.data.url);
+  dlg.onclose = null; dlg.showModal(); $('#dlg-in').select();
+}
 
 // ---- Attendance records ----
 let records = [];

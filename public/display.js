@@ -1,12 +1,17 @@
 import { $, api } from '/common.js';
 
-const id = $('#display').dataset.venue;
+const id = $('#display').dataset.venue, screen = $('#display').dataset.screen;
 let day = null;
+if (screen) $('#d-back').hidden = true;                     // screen link: no dashboard for passers-by
 
 async function load() {
-  const { ok, status, data } = await api(`/api/admin/venues/${id}/qr`);
+  const { ok, status, data } = await api(screen ? `/api/screen/${encodeURIComponent(screen)}` : `/api/admin/venues/${id}/qr`);
   if (status === 401) return location.replace('/admin');
-  if (!ok) return;
+  $('#d-err').hidden = ok || status === 0;                  // keep showing the last code if the internet blips
+  if (!ok) {
+    if (status && data?.error) { $('#d-err').textContent = data.error; $('#d-qr').innerHTML = ''; day = null; }
+    return;
+  }
   if (data.day !== day) {                                    // first load, or the day changed: new code
     day = data.day;
     $('#d-qr').innerHTML = data.svg;

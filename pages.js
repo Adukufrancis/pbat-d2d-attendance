@@ -153,7 +153,7 @@ export const PAGES = {
 <div class="toast" id="toast" hidden></div>`, { script: '/admin.js' }),
 
   display: shell('QR screen · {{appName}}', `
-<main class="display" id="display" data-venue="{{venue}}">
+<main class="display" id="display" data-venue="{{venue}}" data-screen="{{screen}}">
   <div class="display-left">
     ${brand}
     <p class="kicker" id="d-date"></p>
@@ -168,12 +168,13 @@ export const PAGES = {
     <div class="display-actions">
       <button class="btn ghost small" id="d-full">Full screen</button>
       <button class="btn ghost small" onclick="print()">Print today's code</button>
-      <a class="btn ghost small" href="/admin">Back to dashboard</a>
+      <a class="btn ghost small" href="/admin" id="d-back">Back to dashboard</a>
     </div>
   </div>
   <div class="display-right">
     <div class="qr" id="d-qr"></div>
     <p class="qr-note">This code changes at midnight.</p>
+    <p class="warn" id="d-err" hidden></p>
     <p class="warn" id="d-warn" hidden>No WiFi saved for this office yet: check-ins will be refused. Open the dashboard on the office WiFi and tap <b>Use this network</b>.</p>
   </div>
 </main>`, { script: '/display.js', bodyClass: 'dark' }),

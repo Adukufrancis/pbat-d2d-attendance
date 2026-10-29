@@ -325,16 +325,53 @@ app.post('/api/admin/venues/:id/networks/:nid/delete', needAdmin, h(async (req, 
   await db.q('deleteNetwork', [Number(req.params.nid), Number(req.params.id)]); res.json({ ok: true });
 }));
 
-// Today's QR for the venue screen.
-app.get('/api/admin/venues/:id/qr', needAdmin, h(async (req, res) => {
-  const v = await db.one('venue', [Number(req.params.id)]);
-  if (!v) return res.status(404).json({ error: 'Office not found.' });
+// Today's QR for the venue screen (shared by the admin screen and the no-login screen link).
+async function screenData(req, v) {
   const day = dayOf();
   const url = `${baseUrl(req)}/c/${v.id}/${codeFor(v.id, day)}`;
   const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#06492a', light: '#ffffff' } });
   const c = await db.one('countToday', [v.id, day]);
   const networks = (await db.q('networks', [v.id])).length;
-  res.json({ name: v.name, day, url, svg, count: c.n, out: c.out, networks, appName: APP_NAME, checkoutTime: CHECKOUT_LABEL });
+  return { name: v.name, day, url, svg, count: c.n, out: c.out, networks, appName: APP_NAME, checkoutTime: CHECKOUT_LABEL };
+}
+app.get('/api/admin/venues/:id/qr', needAdmin, h(async (req, res) => {
+  const v = await db.one('venue', [Number(req.params.id)]);
+  if (!v) return res.status(404).json({ error: 'Office not found.' });
+  res.json(await screenData(req, v));
+}));
+
+// ---- Screen link: show an office's QR on a tablet/TV at the entrance without anyone logging in ----
+// The link is secret and signed. It only works on the office's own WiFi, so a link that leaks is useless
+// elsewhere. "Make a new link" changes the version, which stops every old link working.
+const screenVer = async (id) => Number((await db.one('getSetting', [`screen_ver:${id}`]))?.value || 1);
+const screenToken = (id, ver) => `${id}.${ver}.${hmac(`screen:${id}:${ver}`).slice(0, 22)}`;
+async function venueFromScreenToken(token) {
+  const [id, ver, sig] = String(token || '').split('.');
+  if (!/^\d+$/.test(id || '') || !/^\d+$/.test(ver || '') || !sig) return null;
+  if (Number(ver) !== await screenVer(id) || !safeEqual(sig, screenToken(id, ver).split('.')[2])) return null;
+  return db.one('venue', [Number(id)]);
+}
+app.get('/api/admin/venues/:id/screen-link', needAdmin, h(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!(await db.one('venue', [id]))) return res.status(404).json({ error: 'Office not found.' });
+  res.json({ url: `${baseUrl(req)}/screen/${screenToken(id, await screenVer(id))}` });
+}));
+app.post('/api/admin/venues/:id/screen-link/reset', needAdmin, h(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!(await db.one('venue', [id]))) return res.status(404).json({ error: 'Office not found.' });
+  const ver = (await screenVer(id)) + 1;
+  await db.q('setSetting', [`screen_ver:${id}`, String(ver)]);
+  res.json({ url: `${baseUrl(req)}/screen/${screenToken(id, ver)}` });
+}));
+app.get('/api/screen/:token', h(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const v = await venueFromScreenToken(req.params.token);
+  if (!v) return res.status(404).json({ error: 'This screen link has been replaced or is wrong. Ask an admin for the new link.', reason: 'link' });
+  const nets = (await db.q('networks', [v.id])).map((n) => n.address);
+  if (nets.length && !nets.includes(networkOf(clientIp(req)))) {
+    return res.status(403).json({ error: `This screen only works on ${v.name}'s WiFi. Connect this device to the office WiFi.`, reason: 'network' });
+  }
+  res.json(await screenData(req, v));
 }));
 
 // What the server sees of this connection (to check the WiFi detection after deploying).
@@ -700,6 +737,10 @@ app.get('/', (req, res) => send(res, page(PAGES.home, { v: BUILD, appName: APP_N
 app.get('/c/:venue/:code', (req, res) => send(res, page(PAGES.checkin, { v: BUILD, appName: APP_NAME,
   venue: req.params.venue, code: req.params.code })));
 app.get('/admin', (req, res) => send(res, page(isAdmin(req) ? PAGES.admin : PAGES.login, { v: BUILD, appName: APP_NAME })));
+app.get('/screen/:token', (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
+  send(res, page(PAGES.display, { v: BUILD, appName: APP_NAME, venue: '', screen: req.params.token }));
+});
 app.get('/admin/display/:id', (req, res) => (isAdmin(req)
   ? send(res, page(PAGES.display, { v: BUILD, appName: APP_NAME, venue: req.params.id })) : res.redirect('/admin')));
 
