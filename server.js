@@ -538,6 +538,23 @@ app.get('/api/payroll/days', h(async (req, res) => {
     ...[...by.values()].sort((a, b) => a.name.localeCompare(b.name)).map((p) => [p.name, p.no, p.days.size])] });
 }));
 
+// For moving to Zoni: everything (offices, their WiFi, people and every check-in) as JSON, read once by Zoni's
+// "Import from the old attendance app". Same key as the payroll link (PAYROLL_KEY here = ATTENDANCE_KEY in Zoni).
+app.get('/api/export/all', h(async (req, res) => {
+  const key = process.env.PAYROLL_KEY || '';
+  const given = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!key || given.length !== key.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(key))) {
+    return res.status(401).json({ error: 'Wrong or missing key. Use the same value as PAYROLL_KEY on the attendance app.' });
+  }
+  const venues = await db.q('venues');
+  const networks = [];
+  for (const v of venues) networks.push(...(await db.q('networks', [v.id])));
+  const people = (await db.q('people', [dayOf()])).map((p) => ({ id: p.id, name: p.name, member_no: p.member_no, listed: p.listed, created_at: p.created_at }));
+  const attendance = (await db.q('attendanceFor', ['0000-01-01', '9999-12-31', 0])).map((a) => ({ person_id: a.person_id, venue_id: a.venue_id,
+    day: a.day, at: a.at, checkout_at: a.checkout_at, new_device: a.new_device, by_admin: a.by_admin, by_name: a.by_name }));
+  res.set('Cache-Control', 'no-store').json({ exportedAt: Date.now(), venues: venues.map((v) => ({ id: v.id, name: v.name, created_at: v.created_at })), networks, people, attendance });
+}));
+
 app.get('/api/admin/people', needAdmin, h(async (req, res) => res.json({
   people: await db.q('people', [dayOf()]), prefix: NUMBER_PREFIX, digits: NUMBER_DIGITS, timezone: TZ,
 })));
