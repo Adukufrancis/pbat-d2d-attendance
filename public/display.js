@@ -23,6 +23,7 @@ async function load() {
     if (el.textContent !== String(n)) { el.textContent = n; el.parentElement.classList.remove('bump'); void el.offsetWidth; el.parentElement.classList.add('bump'); }
   }
   $('#d-out-time').textContent = data.checkoutTime;
+  if (data.staffLink) { $('#d-link').hidden = false; $('#d-link-url').textContent = data.staffLink.replace(/^https?:\/\//, ''); }
   $('#d-warn').hidden = data.networks > 0;
 }
 

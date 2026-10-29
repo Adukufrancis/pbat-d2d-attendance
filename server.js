@@ -332,7 +332,8 @@ async function screenData(req, v) {
   const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#06492a', light: '#ffffff' } });
   const c = await db.one('countToday', [v.id, day]);
   const networks = (await db.q('networks', [v.id])).length;
-  return { name: v.name, day, url, svg, count: c.n, out: c.out, networks, appName: APP_NAME, checkoutTime: CHECKOUT_LABEL };
+  return { name: v.name, day, url, svg, count: c.n, out: c.out, networks, appName: APP_NAME, checkoutTime: CHECKOUT_LABEL,
+    staffLink: `${baseUrl(req)}/in/${v.id}` };
 }
 app.get('/api/admin/venues/:id/qr', needAdmin, h(async (req, res) => {
   const v = await db.one('venue', [Number(req.params.id)]);
@@ -736,6 +737,21 @@ const send = (res, html) => res.set('Cache-Control', 'no-store').type('html').se
 app.get('/', (req, res) => send(res, page(PAGES.home, { v: BUILD, appName: APP_NAME })));
 app.get('/c/:venue/:code', (req, res) => send(res, page(PAGES.checkin, { v: BUILD, appName: APP_NAME,
   venue: req.params.venue, code: req.params.code })));
+// Permanent staff check-in link: same as scanning the QR (today's code is filled in here), so staff can save
+// it on their phone. It still only works on the office WiFi and from the phone linked to them.
+app.get('/in/:venue', h(async (req, res) => {
+  const v = await db.one('venue', [Number(req.params.venue)]);
+  if (!v) return res.status(404).send('Office not found. Ask the office admin for the right link.');
+  res.set('Cache-Control', 'no-store');
+  send(res, page(PAGES.checkin, { v: BUILD, appName: APP_NAME, venue: v.id, code: codeFor(v.id) }));
+}));
+app.get('/in', h(async (req, res) => {
+  const venues = await db.q('venues');
+  if (venues.length === 1) return res.redirect(`/in/${venues[0].id}`);
+  res.set('Cache-Control', 'no-store').type('html').send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Check in</title><body style="font:16px system-ui;padding:24px;max-width:420px;margin:auto"><h1>Which office?</h1>
+    ${venues.map((v) => `<p><a style="display:block;padding:14px;border:1px solid #ccc;border-radius:12px;text-decoration:none;color:#06492a;font-weight:600" href="/in/${v.id}">${String(v.name).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)}</a></p>`).join('') || '<p>No office has been set up yet.</p>'}`);
+}));
 app.get('/admin', (req, res) => send(res, page(isAdmin(req) ? PAGES.admin : PAGES.login, { v: BUILD, appName: APP_NAME })));
 app.get('/screen/:token', (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });

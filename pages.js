@@ -174,6 +174,7 @@ export const PAGES = {
   <div class="display-right">
     <div class="qr" id="d-qr"></div>
     <p class="qr-note">This code changes at midnight.</p>
+    <p class="qr-note staff-link" id="d-link" hidden>No camera? Open <b id="d-link-url"></b> on the office WiFi.</p>
     <p class="warn" id="d-err" hidden></p>
     <p class="warn" id="d-warn" hidden>No WiFi saved for this office yet: check-ins will be refused. Open the dashboard on the office WiFi and tap <b>Use this network</b>.</p>
   </div>

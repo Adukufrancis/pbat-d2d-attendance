@@ -104,6 +104,7 @@ function renderVenues() {
       <div class="venue-actions">
         <a class="btn" href="/admin/display/${v.id}">Show QR code</a>
         <button class="btn ghost" data-act="screen">Screen link</button>
+        <button class="btn ghost" data-act="stafflink">Staff check-in link</button>
         ${here ? '<span class="pill ok">✓ You\'re on this office\'s WiFi</span>' : '<button class="btn ghost" data-act="usenet">Use this network</button>'}
       </div>
       <details class="nets"><summary>WiFi networks & settings</summary>
@@ -134,6 +135,7 @@ $('#venues').addEventListener('click', async (e) => {
     if (ok && (await call(`/api/admin/venues/${id}/networks`, {})).ok) { toast('✓ WiFi saved'); loadState(); }
   }
   if (b.dataset.act === 'screen') return screenLink(id, v);
+  if (b.dataset.act === 'stafflink') return staffLink(id, v);
   if (b.dataset.act === 'delnet') {
     const ok = await ask({ title: 'Remove this network?', text: 'Phones on it will no longer be able to check in here.', ok: 'Remove', danger: true });
     if (ok && (await call(`/api/admin/venues/${id}/networks/${b.dataset.nid}/delete`, {})).ok) loadState();
@@ -147,6 +149,24 @@ $('#venues').addEventListener('click', async (e) => {
     if (ok && (await call(`/api/admin/venues/${id}/delete`, {})).ok) { toast('Office deleted'); loadState(); }
   }
 });
+
+// Staff check-in link: permanent; staff save it on their phone and tap it at the office instead of scanning.
+function staffLink(id, v) {
+  const url = `${location.origin}/in/${id}`;
+  const dlg = $('#dlg'), form = $('#dlg-form');
+  form.innerHTML = `<h3>Staff check-in link for ${esc(v.name)}</h3>
+    <p class="muted">Share this with staff (e.g. on the staff WhatsApp group). They save it on their phone and <b>tap it when they arrive</b>
+      instead of scanning the QR code. It works the same way: only on this office's WiFi, and only from the phone linked to each person.</p>
+    <label class="field"><span>Check-in link</span><input id="dlg-in" value="${esc(url)}" readonly></label>
+    <p class="fine">Tip for staff: open the link once, then use <b>Add to Home Screen</b> (iPhone: Share → Add to Home Screen; Android: ⋮ → Add to Home screen) to get a one-tap check-in icon. From ${esc(S.checkoutTime || '5:00 PM')}, tapping it again checks them out.</p>
+    <div class="dlg-actions">
+      <button class="btn" type="button" id="sl-copy">Copy link</button>
+      <a class="btn ghost" href="https://wa.me/?text=${encodeURIComponent(`Check in at ${v.name}: tap this link when you arrive (on the office WiFi). Save it to your home screen. ${url}`)}" target="_blank" rel="noopener">Share on WhatsApp</a>
+      <button class="btn ghost" value="cancel" formnovalidate>Close</button>
+    </div>`;
+  $('#sl-copy').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('✓ Link copied'); } catch { $('#dlg-in').select(); } };
+  dlg.onclose = null; dlg.showModal(); $('#dlg-in').select();
+}
 
 // Screen link: opens this office's QR screen without logging in (for a tablet/TV at the entrance).
 async function screenLink(id, v) {
