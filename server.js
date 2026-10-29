@@ -516,6 +516,28 @@ app.get('/admin/attendance.pdf', h(async (req, res) => {
   doc.end();
 }));
 
+// For Zoni Payroll: days worked per person in a month (different dates checked in). Needs PAYROLL_KEY
+// (set the same value as ATTENDANCE_KEY in Zoni Payroll on Render). Not available when PAYROLL_KEY isn't set.
+app.get('/api/payroll/days', h(async (req, res) => {
+  const key = process.env.PAYROLL_KEY || '';
+  const given = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!key || given.length !== key.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(key))) {
+    return res.status(401).json({ error: 'Wrong or missing payroll key.' });
+  }
+  const month = String(req.query.month || '');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'month must look like 2026-11.' });
+  const [y, m] = month.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const rows = await db.q('attendanceFor', [`${month}-01`, `${month}-${String(last).padStart(2, '0')}`, 0]);
+  const by = new Map();
+  for (const r of rows) {
+    const p = by.get(r.person_id) || { name: r.name, no: r.member_no, days: new Set() };
+    p.days.add(r.day); by.set(r.person_id, p);
+  }
+  res.json({ month, rows: [['Name', 'PBAT-D2D number', 'Days worked'],
+    ...[...by.values()].sort((a, b) => a.name.localeCompare(b.name)).map((p) => [p.name, p.no, p.days.size])] });
+}));
+
 app.get('/api/admin/people', needAdmin, h(async (req, res) => res.json({
   people: await db.q('people', [dayOf()]), prefix: NUMBER_PREFIX, digits: NUMBER_DIGITS, timezone: TZ,
 })));
