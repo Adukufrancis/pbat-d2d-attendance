@@ -440,14 +440,14 @@ app.get('/admin/attendance.xlsx', h(async (req, res) => {
   // Second sheet: one line per person with days present and total hours.
   const sum = wb.addWorksheet('Summary');
   sum.columns = [{ header: 'Name', key: 'name', width: 28 }, { header: 'PBAT-D2D number', key: 'no', width: 22 },
-    { header: 'Days present', key: 'days', width: 14 }, { header: 'Total hours', key: 'hours', width: 13 }];
-  const by = new Map();
+    { header: 'Days worked', key: 'days', width: 14 }, { header: 'Total hours', key: 'hours', width: 13 }];
+  const by = new Map();   // days = different dates checked in (two offices on one day still count once)
   for (const r of rows) {
-    const p = by.get(r.person_id) || { name: r.name, no: r.member_no, days: 0, hours: 0 };
-    p.days++; if (r.checkout_at) p.hours += (r.checkout_at - r.at) / 36e5; by.set(r.person_id, p);
+    const p = by.get(r.person_id) || { name: r.name, no: r.member_no, days: new Set(), hours: 0 };
+    p.days.add(r.day); if (r.checkout_at) p.hours += (r.checkout_at - r.at) / 36e5; by.set(r.person_id, p);
   }
   [...by.values()].sort((a, b) => a.name.localeCompare(b.name))
-    .forEach((p) => { sum.addRow({ ...p, hours: Math.round(p.hours * 100) / 100 }).getCell('hours').numFmt = '0.00'; });
+    .forEach((p) => { sum.addRow({ ...p, days: p.days.size, hours: Math.round(p.hours * 100) / 100 }).getCell('hours').numFmt = '0.00'; });
   sum.getRow(1).eachCell((c) => { c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0A6B3D' } }; });
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     .set('Content-Disposition', `attachment; filename="attendance-${from}${to !== from ? `-to-${to}` : ''}.xlsx"`);

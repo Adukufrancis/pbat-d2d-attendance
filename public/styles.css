@@ -336,3 +336,12 @@ dialog { width: min(520px, calc(100% - 32px)); }
   .me-name { display: none; }
   .two { grid-template-columns: 1fr; }
 }
+
+/* Attendance: Check-ins / Days worked switch */
+.view-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+.seg { display: inline-flex; background: var(--card); border-radius: 12px; padding: 4px; box-shadow: inset 0 0 0 1.5px var(--line); }
+.seg button { border: 0; background: none; padding: 8px 14px; border-radius: 9px; font: 600 14px Inter, sans-serif; color: var(--muted, #5d6a63); cursor: pointer; }
+.seg button.on { background: var(--green); color: #fff; }
+.small-btn { padding: 9px 14px; font-size: 14px; }
+.days-note { margin: 0 0 12px; font-size: 14px; }
+.table th.num, .table td.num { text-align: right; }

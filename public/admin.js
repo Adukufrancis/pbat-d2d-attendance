@@ -206,7 +206,10 @@ async function loadRecords() {
   const people = new Set(records.map((x) => x.person_id)).size;
   $('#rec-summary').textContent = `${records.length} check-in${records.length === 1 ? '' : 's'} · ${people} ${people === 1 ? 'person' : 'people'}`;
   const t = $('#records');
+  const daysView = VIEW === 'days';
+  $('#copy-days').hidden = !daysView || !records.length; $('#days-note').hidden = !daysView;
   if (!records.length) { t.innerHTML = '<tbody><tr><td class="empty-row">No check-ins for these dates.</td></tr></tbody>'; return; }
+  if (daysView) return drawDays(t);
   const multiDay = $('#from').value !== $('#to').value;
   t.innerHTML = `<thead><tr>${multiDay ? '<th>Date</th>' : ''}<th>In</th><th>Out</th><th>Hours</th><th>Name</th><th>PBAT-D2D no.</th><th>Office</th><th></th></tr></thead><tbody>${
     records.map((x) => `<tr data-id="${x.id}">${multiDay ? `<td>${fmtDay(x.day, { day: 'numeric', month: 'short' })}</td>` : ''}
@@ -215,6 +218,40 @@ async function loadRecords() {
       <td>${esc(x.member_no)}</td><td>${esc(x.venue)}</td>
       <td><button class="linkish danger" data-del>Remove</button></td></tr>`).join('')}</tbody>`;
 }
+// ---- Days worked: one line per person (for pasting into Zoni Payroll) ----
+let VIEW = 'list';
+function daysWorked() {
+  const by = new Map();
+  for (const r of records) {
+    const p = by.get(r.person_id) || { name: r.name, no: r.member_no, days: new Set(), mins: 0, open: 0 };
+    p.days.add(r.day);
+    if (r.checkout_at) p.mins += Math.round((r.checkout_at - r.at) / 60000); else p.open++;
+    by.set(r.person_id, p);
+  }
+  return [...by.values()].map((p) => ({ ...p, days: p.days.size })).sort((a, b) => a.name.localeCompare(b.name));
+}
+const hm = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+function drawDays(t) {
+  const list = daysWorked();
+  t.innerHTML = `<thead><tr><th>Name</th><th>PBAT-D2D no.</th><th class="num">Days worked</th><th class="num">Hours</th><th></th></tr></thead><tbody>${
+    list.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.no)}</td><td class="num"><b>${p.days}</b></td>
+      <td class="num">${hm(p.mins)}</td><td>${p.open ? `<span class="pill warn" title="Checked in but never checked out on ${p.open} day(s): those days still count, but their hours don't">${p.open} no check-out</span>` : ''}</td></tr>`).join('')}</tbody>`;
+}
+$('#rec-view').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-view]'); if (!b) return;
+  VIEW = b.dataset.view; $$('#rec-view [data-view]').forEach((x) => x.classList.toggle('on', x === b));
+  loadRecords();
+});
+$('#copy-days').addEventListener('click', async () => {
+  const lines = [['Name', 'PBAT-D2D number', 'Days worked', 'Hours'].join('\t')]
+    .concat(daysWorked().map((p) => [p.name, p.no, p.days, (p.mins / 60).toFixed(2)].join('\t')));
+  const text = lines.join('\n');
+  try { await navigator.clipboard.writeText(text); toast(`Copied ${lines.length - 1} people. Paste it in Zoni Payroll → Import days worked.`); }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.append(ta); ta.select();
+    const ok = document.execCommand('copy'); ta.remove(); toast(ok ? 'Copied. Paste it in Zoni Payroll.' : 'Could not copy. Use Download → Excel instead.');
+  }
+});
 $('#records').addEventListener('click', async (e) => {
   if (!e.target.matches('[data-del]')) return;
   const id = e.target.closest('tr').dataset.id, x = records.find((r) => String(r.id) === id);
@@ -226,6 +263,13 @@ for (const el of ['#from', '#to', '#venue-filter']) $(el).addEventListener('chan
   loadRecords();
 });
 $$('[data-range]').forEach((c) => c.addEventListener('click', () => {
+  if (c.dataset.range.endsWith('month')) {  // whole calendar month: this one so far, or the last one
+    const [y, m] = S.today.split('-').map(Number);
+    const first = c.dataset.range === 'month' ? new Date(Date.UTC(y, m - 1, 1)) : new Date(Date.UTC(y, m - 2, 1));
+    const last = c.dataset.range === 'month' ? null : new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0));
+    $('#from').value = first.toISOString().slice(0, 10); $('#to').value = last ? last.toISOString().slice(0, 10) : S.today;
+    return loadRecords();
+  }
   const n = Number(c.dataset.range);
   $('#to').value = n === 1 ? addDays(S.today, -1) : S.today;
   $('#from').value = n <= 1 ? $('#to').value : addDays(S.today, -(n - 1));

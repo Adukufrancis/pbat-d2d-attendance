@@ -130,8 +130,19 @@ export const PAGES = {
         <button class="chip" data-range="1">Yesterday</button>
         <button class="chip" data-range="7">Last 7 days</button>
         <button class="chip" data-range="30">Last 30 days</button>
+        <button class="chip" data-range="month">This month</button>
+        <button class="chip" data-range="lastmonth">Last month</button>
       </div>
     </div>
+    <div class="view-bar">
+      <div class="seg" id="rec-view" role="group" aria-label="View">
+        <button type="button" data-view="list" class="on">Check-ins</button>
+        <button type="button" data-view="days">Days worked</button>
+      </div>
+      <button type="button" class="btn ghost small-btn" id="copy-days" hidden>Copy for payroll</button>
+    </div>
+    <p class="muted days-note" id="days-note" hidden>One line per person: the number of different days they checked in. Pick the pay month above
+      (e.g. <b>Last month</b>), press <b>Copy for payroll</b>, then paste it in Zoni Payroll under <b>Import days worked</b>.</p>
     <div class="table-wrap"><table class="table" id="records"></table></div>
   </section>
 
